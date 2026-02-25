@@ -19,27 +19,23 @@ export default function WrappedPasswordPage() {
 
 function PasswordPage() {
   const router = useRouter();
-  const [email, setEmail] = useState("");
+  // const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [showAlert, setShowAlert] = useState(false);
   const [alertMessage, setAlertMessage] = useState("");
 
 
-  const handleEmail = async () => {
+  const handlePassword = async () => {
     try {
-      let userEmail = email;
-      await supabase.auth.resetPasswordForEmail(userEmail, {
-      redirectTo: (location.origin + "/updatepassword"),
-    })
+      let userPassword = password;
+      await supabase.auth.updateUser({ password: userPassword })
+      router.push("/login");
     } catch (error) {
       setAlertMessage(
         (error as Error).message || "Password Reset failed. Please try again.",
       );
       setShowAlert(true);
     }
-    setAlertMessage(
-        "Check Email to Reset Password",
-      );
-      setShowAlert(true);
   };
 
   return (
@@ -54,20 +50,20 @@ function PasswordPage() {
             <h2 className="text-2xl font-semibold">Reset Password</h2>
           </div>
           <div className="text-[#666C7A]">
-            Enter your email
+            Enter a new password
           </div>
           <Input
             className="h-10 w-full rounded-lg border-none bg-[#EFF3F6] px-4"
-            type="text"
-            placeholder="Email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            type="password"
+            placeholder="Password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
           />
           <Button
             className="h-10 w-full rounded-lg bg-[#1E1F28] text-lg text-white"
-            onClick={handleEmail}
+            onClick={handlePassword}
           >
-            Send Email
+            Reset Password
           </Button>
         </div>
 
