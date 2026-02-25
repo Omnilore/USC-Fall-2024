@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect, useMemo } from "react";
-import { getRoles, signOut, getMembershipLink } from "@/app/supabase";
+import { getRoles, signOut } from "@/app/supabase";
 import UserIcon from "@/components/assets/user-icon.png";
 import { queryTableWithFields } from "@/app/queryFunctions";
 import NavBar from "@/components/ui/NavBar";
@@ -48,81 +48,10 @@ export default function Search() {
   );
   const [isMemberPanelOpen, setIsMemberPanelOpen] = useState(false);
   const [membershipUrl, setMembershipUrl] = useState<string>("");
-  const [membershipModalOpen, setMembershipModalOpen] = useState(false);
-  const [memberSearchQuery, setMemberSearchQuery] = useState("");
-  const [selectedMemberForMembership, setSelectedMemberForMembership] =
-    useState<Record<string, any> | null>(null);
 
   useEffect(() => {
     getMembershipLink().then(setMembershipUrl);
   }, []);
-
-  const selectableMembers = useMemo(
-    () =>
-      entries.filter(
-        (item) => item.public !== false && item.type !== "NONMEMBER",
-      ),
-    [entries],
-  );
-
-  const membershipSearchMatches = useMemo(() => {
-    if (!memberSearchQuery.trim()) return selectableMembers.slice(0, 10);
-    const q = memberSearchQuery.toLowerCase().trim();
-    const terms = q.split(/\s+/).filter(Boolean);
-    return selectableMembers
-      .filter((m) => {
-        const name = `${m.first_name || ""} ${m.last_name || ""} ${m.alias || ""}`.toLowerCase();
-        return terms.every((t) => name.includes(t));
-      })
-      .slice(0, 10);
-  }, [memberSearchQuery, selectableMembers]);
-
-  function openMembershipWithMember(member: Record<string, any> | null) {
-    if (!membershipUrl) return;
-    let url = membershipUrl;
-    if (member) {
-      const params = new URLSearchParams();
-      const first = (member.first_name ?? "").toString();
-      const last = (member.last_name ?? "").toString();
-      const email = (member.email ?? "").toString();
-      const phone = (member.phone ?? "").toString();
-      const street = (member.street_address ?? "").toString();
-      const city = (member.city ?? "").toString();
-      const state = (member.state ?? "").toString();
-      let zip = (member.zip_code ?? "").toString().trim().replace(/^-+/, "");
-      const zipDigits = zip.replace(/\D/g, "");
-      if (zipDigits.length === 9) zip = zipDigits.slice(0, 5) + "-" + zipDigits.slice(5);
-      // Standard param names (for other systems)
-      params.set("firstName", first);
-      params.set("lastName", last);
-      params.set("email", email);
-      params.set("phone", phone);
-      params.set("address", street);
-      params.set("city", city);
-      params.set("state", state);
-      params.set("zip", zip);
-      params.set("zipCode", zip);
-      // Squarespace form prefill: SQF_ prefix + ALL CAPS (required by Squarespace)
-      params.set("SQF_FIRSTNAME", first);
-      params.set("SQF_FIRST_NAME", first);
-      params.set("SQF_LASTNAME", last);
-      params.set("SQF_LAST_NAME", last);
-      params.set("SQF_EMAIL", email);
-      params.set("SQF_PHONE", phone);
-      params.set("SQF_STREET_ADDRESS", street);
-      params.set("SQF_ADDRESS", street);
-      params.set("SQF_CITY", city);
-      params.set("SQF_STATE", state);
-      params.set("SQF_ZIP_CODE", zip);
-      params.set("SQF_ZIP", zip);
-      const sep = url.includes("?") ? "&" : "?";
-      url = `${url}${sep}${params.toString()}`;
-    }
-    window.open(url, "_blank", "noopener,noreferrer");
-    setMembershipModalOpen(false);
-    setMemberSearchQuery("");
-    setSelectedMemberForMembership(null);
-  }
 
   const filteredEntries = useMemo(() => {
     const keywords = query.toLowerCase().split(" ").filter(Boolean);
@@ -222,17 +151,19 @@ export default function Search() {
 
   return (
     <div className="flex h-screen w-full flex-col">
-      <div className="flex w-full items-center">
+      <div className="flex items-center">
+        {/* Nav Bar */}
         <NavBar />
         <div className="flex w-full items-center justify-end gap-2 pr-12">
           {membershipUrl && (
-            <button
-              type="button"
-              onClick={() => setMembershipModalOpen(true)}
+            <a
+              href={membershipUrl}
+              target="_blank"
+              rel="noopener noreferrer"
               className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm transition-colors hover:bg-gray-50"
             >
               Join or renew membership
-            </button>
+            </a>
           )}
           <button
             onClick={async () => {

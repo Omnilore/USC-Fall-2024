@@ -124,16 +124,6 @@ export default function AdminLayout({
               {" "}
               <MailInButton />{" "}
             </div>
-            <a
-              href="https://omnilore-ecart.squarespace.com/membership"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="group flex w-full cursor-pointer items-center gap-2 rounded-lg p-2 text-[#85849E] hover:bg-[#F6F6F6]"
-            >
-              <span className="text-left group-hover:text-[#000000]">
-                Membership (Join/Renew)
-              </span>
-            </a>
           </div>
 
           {/* Spacer to push logout to bottom */}

@@ -198,21 +198,3 @@ export async function getDocumentationLink() {
 
   return data[0].link;
 }
-
-const MEMBERSHIP_LINK_FALLBACK =
-  "https://omnilore-ecart.squarespace.com/membership";
-
-export async function getMembershipLink() {
-  const { data, error } = await supabase
-    .from("dynamic_links")
-    .select("link")
-    .eq("name", "membership")
-    .maybeSingle();
-
-  if (error) {
-    console.error("Failed to fetch membership link:", error.message);
-    return MEMBERSHIP_LINK_FALLBACK;
-  }
-
-  return data?.link ?? MEMBERSHIP_LINK_FALLBACK;
-}
