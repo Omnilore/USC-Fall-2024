@@ -111,7 +111,7 @@ export default function ForumReports() {
 
     const { data: mtt, error: mttError } = await supabase
       .from("members_to_transactions")
-      .select("member_id, transaction_id, sku")
+      .select("member_id, transaction_id, sku, amount")
       .in("sku", forumSkus);
 
     if (mttError) {
@@ -182,7 +182,20 @@ export default function ForumReports() {
 
     const memberMap = Object.fromEntries(members.map((m) => [String(m.id), m]));
 
-    const formatted = mtt
+    // Filter mtt entries based on custom range if applicable
+    let filteredMtt = mtt;
+    if (customRange) {
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      filteredMtt = mtt.filter((row) => {
+        const tx = transactionMap[row.transaction_id];
+        if (!tx) return false;
+        const txDate = new Date(tx.date);
+        return txDate >= start && txDate <= end;
+      });
+    }
+
+    const formatted = filteredMtt
       .map((entry) => {
         const member = memberMap[String(entry.member_id)];
         const tx = transactionMap[entry.transaction_id];
@@ -193,7 +206,7 @@ export default function ForumReports() {
           phone: formatPhoneNumber(member?.phone ?? ""),
           type: member?.type ?? "",
           date: tx?.date ?? "",
-          amount: tx?.amount ?? 0,
+          amount: entry.amount ?? 0,
           descriptor: skuDescriptorMap[entry.sku] ?? "",
         };
       })

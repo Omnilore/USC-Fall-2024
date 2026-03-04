@@ -13,10 +13,6 @@ const nextConfig = {
     return config;
   },
 
-  experimental: {
-    reactCompiler: true,
-  },
-
   turbopack: {
     rules: {
       "*.svg": {
