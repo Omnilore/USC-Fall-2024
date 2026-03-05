@@ -39,14 +39,16 @@ function Table() {
     "selected_table",
     "members",
   );
+
   const [selectedSort, setSelectedSort] = useLocalStorage<string>(
-    `selected_sort_${selectedTable}`,
+    `selected_sort_${String(selectedTable)}`,
     "default",
   );
   const [selectedSortWay, setSelectedSortWay] = useLocalStorage<"asc" | "desc">(
-    `selected_sort_way_${selectedTable}`,
+    `selected_sort_way_${String(selectedTable)}`,
     "asc",
   );
+
   const [sortOptions, setSortOptions] = useState<string[]>(["default"]);
   const [primaryKeys, setPrimaryKeys] = useState<string[]>([]);
   const [isEntryPanelOpen, setIsEntryPanelOpen] = useState(false);
@@ -412,7 +414,7 @@ setMemberTransactions(prev =>
         setPermissions(allPermissions);
         setTables(tablesArray);
 
-        if (tablesArray.length > 0 && !tablesArray.includes(selectedTable)) {
+        if (tablesArray.length > 0 && !tablesArray.includes(String(selectedTable))) {
           setSelectedTable(tablesArray[0] as TableName);
         }
       } catch (error) {
@@ -433,9 +435,11 @@ setMemberTransactions(prev =>
           selectedTable === "audit_logs" ? { includeServiceLogs, limit: 1000 }: undefined,
         );
       setEntries(data);
-      setPrimaryKeys(primaryKeys ?? "");
+      
+      setPrimaryKeys(primaryKeys ?? []);
 
-      const keys = new Set(Object.keys(data[0]));
+      // Guard against empty data
+      const keys = data && data.length > 0 ? new Set(Object.keys(data[0])) : new Set<string>();
       const sortOptions = ["default"];
 
       for (const key of [
@@ -463,7 +467,10 @@ setMemberTransactions(prev =>
 
       setSortOptions(sortOptions);
     } catch (error) {
-      console.error(`Failed to fetch data for table ${selectedTable}`, error);
+      console.error(
+        `Failed to fetch data for table ${String(selectedTable)}`,
+        error
+      );
       console.error("Error details:", JSON.stringify(error, null, 2));
     }
   };
@@ -612,7 +619,7 @@ setMemberTransactions(prev =>
                   <div className="w-1/5">
                     <SelectDropdown
                       options={tables}
-                      selectedOption={selectedTable}
+                      selectedOption={String(selectedTable)}
                       setSelectedOption={(table) => {
                         setSelectedTable(table as TableName);
                       }}

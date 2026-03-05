@@ -236,7 +236,7 @@ export default function Search() {
               onClick={() => setMembershipModalOpen(true)}
               className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm transition-colors hover:bg-gray-50"
             >
-              Join or renew membership
+              Renew membership
             </button>
           )}
           <button
