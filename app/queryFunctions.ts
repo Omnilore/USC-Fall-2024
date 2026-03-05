@@ -4,21 +4,39 @@ import { Database } from "./api/cron/src/supabase/types";
 export type TableName = keyof Database["public"]["Tables"] | "audit_logs";
 
 export const queryTableWithPrimaryKey = async (
-  table: TableName,
+  table: TableName, options?: { includeServiceLogs?: boolean; limit?: number},
 ): Promise<{ data: any[]; primaryKeys: string[] }> => {
   console.log(`Querying table: ${table}`);
 
+  const limit = options?.limit ?? 1000;
+
+
   // Fetch the table content
   //
-  const { data, error } = await supabase.from(table).select("*");
+  //const { data, error } = await supabase.from(table).select("*");
   let query = supabase.from(table).select("*");
 
-  // Special handling for audit_logs
   if (table === "audit_logs") {
+    if (options?.includeServiceLogs === false) {
+      query = query.neq("source", "service");
+    }
+
     query = query
       .order("recorded_at", { ascending: false })
-      .range(0, 999); // latest 1000 logs
+      .range(0, limit - 1);
   }
+
+  // // Special handling for audit_logs
+  // if (table === "audit_logs") {
+  //   query = query.order("recorded_at", { ascending: false });
+
+  //   // newest 1000 non-service logs
+  //   if (options?.includeServiceLogs === false) {
+  //     query = query.neq("source", "service");
+  //   }
+  //   // newest 1000 rows after applying filtering
+  //   query = query.range(0, 999);
+  // }
 
   const { data, error } = await query;
 

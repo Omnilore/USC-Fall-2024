@@ -64,7 +64,6 @@ function Table() {
       if (selectedTable === "audit_logs" && !includeServiceLogs) {
             base = base.filter((row) => row?.source !== "service");
       }
-
     const keywords = query.toLowerCase().split(" ").filter(Boolean);
     return base.filter((item) =>
       keywords.every((kw) =>
@@ -188,7 +187,9 @@ function Table() {
     if (!selectedTable) return;
     try {
       const { data, primaryKeys } =
-        await queryTableWithPrimaryKey(selectedTable);
+        await queryTableWithPrimaryKey(selectedTable,
+          selectedTable === "audit_logs" ? { includeServiceLogs, limit: 1000 }: undefined,
+        );
       setEntries(data);
       setPrimaryKeys(primaryKeys ?? "");
 
@@ -227,7 +228,7 @@ function Table() {
 
   useEffect(() => {
     fetchEntries();
-  }, [selectedTable]);
+  }, [selectedTable,includeServiceLogs]);
 
   const hasPermission = (action: keyof Permission) => {
     if (!selectedTable) return false;
