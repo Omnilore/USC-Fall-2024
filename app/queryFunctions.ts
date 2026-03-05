@@ -13,7 +13,7 @@ export const queryTableWithPrimaryKey = async (
 
   // Fetch the table content
   //
-  const { data, error } = await supabase.from(table).select("*");
+  //const { data, error } = await supabase.from(table).select("*");
   let query = supabase.from(table).select("*");
 
   if (table === "audit_logs") {
