@@ -7,6 +7,8 @@ import { Temporal } from "temporal-polyfill";
 import { updatePayout } from "./actions";
 import { toast } from "sonner";
 import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
+import { saveAs } from "file-saver";
 
 const TreasurerReqs = () => {
   const [fromDate, setFromDate] = useState("");
@@ -26,6 +28,16 @@ const TreasurerReqs = () => {
   const [stripePayout, setStripePayout] = useState<Record<string, number>>({});
 
   const [donors, setDonors] = useState<any[]>([]);
+
+  const [categorySummary, setCategorySummary] = useState<{
+    membership: { total: number; count: number };
+    forum: { total: number; count: number };
+    donation: { total: number; count: number };
+  }>({
+    membership: { total: 0, count: 0 },
+    forum: { total: 0, count: 0 },
+    donation: { total: 0, count: 0 },
+  });
 
   const [customRange, setCustomRange] = useState(false);
   const [selectedYears, setSelectedYears] = useState<string[]>([]);
@@ -122,8 +134,138 @@ const TreasurerReqs = () => {
         ],
         rows: stripeRows,
       },
+    ];
+
+    let allData: any[][] = [];
+
+    reportSections.forEach(({ title, headers, rows }) => {
+      allData.push([title]);
+      allData.push(headers);
+      allData.push(...rows);
+      allData.push([]);
+    });
+
+    // Create CSV content
+    const csvContent = allData.map(row =>
+      row.map(field => `"${String(field).replace(/"/g, '""')}"`).join(",")
+    ).join("\r\n");
+
+    let filename = "";
+    if (customRange && startDate && endDate) {
+      filename = `financial_report_${startDate}_to_${endDate}.csv`;
+    } else {
+      const yearsString =
+        selectedYears.length > 0 ? selectedYears.join("_") : "all";
+      filename = `financial_report_${yearsString}.csv`;
+    }
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", filename);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const exportFullReportToXLSX = async () => {
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet("Financial Report");
+
+    const buildFullYearRows = (dataBuilder: (month: number) => any) => {
+      const fullYearData: any[] = [];
+      for (let month = 1; month <= 12; month++) {
+        const monthInRange = monthsInRange.find(m => m.month === month);
+        if (monthInRange) {
+          fullYearData.push(dataBuilder(month));
+        } else {
+          fullYearData.push("");
+        }
+      }
+      return fullYearData;
+    };
+
+    const squarespaceRowsFull = categories.map((cat) => {
+      const row: any[] = [cat];
+      let ytdGross = 0;
+      let ytdFee = 0;
+
+      for (let month = 1; month <= 12; month++) {
+        const monthInRange = monthsInRange.find(m => m.month === month);
+        if (monthInRange) {
+          const key = `${cat}-${monthInRange.year}-${month}`;
+          const gross = grossData[key] ?? 0;
+          const fee = feeData[key] ?? 0;
+          ytdGross += gross;
+          ytdFee += fee;
+          row.push((gross - fee).toFixed(2));
+        } else {
+          row.push("");
+        }
+      }
+      row.push((ytdGross - ytdFee).toFixed(2));
+      return row;
+    });
+
+    const paypalRowsFull = [
+      [
+        "Gross",
+        ...buildFullYearRows((month) => {
+          const monthData = monthsInRange.find(m => m.month === month);
+          return monthData ? (paypalGross[`${monthData.year}-${month}`] ?? 0).toFixed(2) : "";
+        }),
+        getRangeTotal(paypalGross).toFixed(2),
+      ],
+      [
+        "Fee",
+        ...buildFullYearRows((month) => {
+          const monthData = monthsInRange.find(m => m.month === month);
+          return monthData ? (paypalFee[`${monthData.year}-${month}`] ?? 0).toFixed(2) : "";
+        }),
+        getRangeTotal(paypalFee).toFixed(2),
+      ],
+      [
+        "Payout",
+        ...buildFullYearRows((month) => {
+          const monthData = monthsInRange.find(m => m.month === month);
+          return monthData ? ((paypalPayout[`${monthData.year}-${month}`] ?? 0) / 100).toFixed(2) : "";
+        }),
+        (getRangeTotal(paypalPayout) / 100).toFixed(2),
+      ],
+    ];
+
+    const stripeRowsFull = [
+      [
+        "Gross",
+        ...buildFullYearRows((month) => {
+          const monthData = monthsInRange.find(m => m.month === month);
+          return monthData ? (stripeGross[`${monthData.year}-${month}`] ?? 0).toFixed(2) : "";
+        }),
+        getRangeTotal(stripeGross).toFixed(2),
+      ],
+      [
+        "Fee",
+        ...buildFullYearRows((month) => {
+          const monthData = monthsInRange.find(m => m.month === month);
+          return monthData ? (stripeFee[`${monthData.year}-${month}`] ?? 0).toFixed(2) : "";
+        }),
+        getRangeTotal(stripeFee).toFixed(2),
+      ],
+      [
+        "Payout",
+        ...buildFullYearRows((month) => {
+          const monthData = monthsInRange.find(m => m.month === month);
+          return monthData ? ((stripePayout[`${monthData.year}-${month}`] ?? 0) / 100).toFixed(2) : "";
+        }),
+        (getRangeTotal(stripePayout) / 100).toFixed(2),
+      ],
+    ];
+
+    const reportSections = [
       {
-        title: "Donation",
+        title: "Squarespace",
         headers: [
           "Category",
           "Jan",
@@ -140,23 +282,211 @@ const TreasurerReqs = () => {
           "Dec",
           "YTD",
         ],
-        rows: donationRows,
+        rows: squarespaceRowsFull,
+      },
+      {
+        title: "PayPal",
+        headers: [
+          "Category",
+          "Jan",
+          "Feb",
+          "Mar",
+          "Apr",
+          "May",
+          "Jun",
+          "Jul",
+          "Aug",
+          "Sep",
+          "Oct",
+          "Nov",
+          "Dec",
+          "YTD",
+        ],
+        rows: paypalRowsFull,
+      },
+      {
+        title: "Stripe",
+        headers: [
+          "Category",
+          "Jan",
+          "Feb",
+          "Mar",
+          "Apr",
+          "May",
+          "Jun",
+          "Jul",
+          "Aug",
+          "Sep",
+          "Oct",
+          "Nov",
+          "Dec",
+          "YTD",
+        ],
+        rows: stripeRowsFull,
       },
     ];
 
-    let allData: any[][] = [];
+    worksheet.columns = [
+      { width: 20 },
+      { width: 12 },
+      { width: 12 },
+      { width: 12 },
+      { width: 12 },
+      { width: 12 },
+      { width: 12 },
+      { width: 12 },
+      { width: 12 },
+      { width: 12 },
+      { width: 12 },
+      { width: 12 },
+      { width: 12 },
+      { width: 12 },
+      { width: 40 },
+    ];
 
-    reportSections.forEach(({ title, headers, rows }) => {
-      allData.push([title]);
-      allData.push(headers);
-      allData.push(...rows);
-      allData.push([]);
+    let currentRow = 1;
+
+    reportSections.forEach((section) => {
+      const titleRow = worksheet.getRow(currentRow);
+      titleRow.getCell(1).value = section.title;
+      titleRow.getCell(1).font = { bold: true, size: 14 };
+      titleRow.getCell(1).fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FFE7E6E6" },
+      };
+      titleRow.getCell(1).border = {
+        top: { style: "medium" },
+        bottom: { style: "medium" },
+        left: { style: "medium" },
+        right: { style: "medium" },
+      };
+      currentRow++;
+
+      const headerRow = worksheet.getRow(currentRow);
+      section.headers.forEach((header, idx) => {
+        const cell = headerRow.getCell(idx + 1);
+        cell.value = header;
+        cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+        cell.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: "FF4472C4" },
+        };
+        cell.alignment = { horizontal: "center", vertical: "middle" };
+        cell.border = {
+          top: { style: "thin" },
+          bottom: { style: "thin" },
+          left: { style: "thin" },
+          right: { style: "thin" },
+        };
+      });
+
+      if (section.title === "Donation") {
+        worksheet.mergeCells(currentRow, 4, currentRow, 8);
+        const addressCell = headerRow.getCell(4);
+        addressCell.value = "Address";
+        addressCell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+        addressCell.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: "FF4472C4" },
+        };
+        addressCell.alignment = { horizontal: "center", vertical: "middle" };
+        addressCell.border = {
+          top: { style: "thin" },
+          bottom: { style: "thin" },
+          left: { style: "thin" },
+          right: { style: "thin" },
+        };
+      }
+
+      currentRow++;
+
+      section.rows.forEach((rowData, rowIdx) => {
+        const dataRow = worksheet.getRow(currentRow);
+        rowData.forEach((cellValue: any, colIdx: number) => {
+          const cell = dataRow.getCell(colIdx + 1);
+          const num = parseFloat(cellValue);
+          cell.value = !isNaN(num) && cellValue !== "" && typeof cellValue === "string" && cellValue.match(/^\d+\.?\d*$/) ? num : cellValue;
+
+          if (colIdx > 0 && typeof cell.value === "number") {
+            cell.numFmt = "$#,##0.00";
+            cell.alignment = { horizontal: "right", vertical: "middle" };
+          } else {
+            cell.alignment = { horizontal: "left", vertical: "middle" };
+          }
+
+          cell.border = {
+            top: { style: "thin", color: { argb: "FFD3D3D3" } },
+            bottom: { style: "thin", color: { argb: "FFD3D3D3" } },
+            left: { style: "thin", color: { argb: "FFD3D3D3" } },
+            right: { style: "thin", color: { argb: "FFD3D3D3" } },
+          };
+
+          if (section.title !== "Donation" && colIdx > 0) {
+            if (colIdx === 13) {
+              cell.fill = {
+                type: "pattern",
+                pattern: "solid",
+                fgColor: { argb: "FFFCD5B4" },
+              };
+            }
+            else if (colIdx % 2 === 1) {
+              cell.fill = {
+                type: "pattern",
+                pattern: "solid",
+                fgColor: { argb: "FFFDE9D9" },
+              };
+            }
+          }
+
+          if (section.title === "Donation" && rowIdx % 2 === 0) {
+            cell.fill = {
+              type: "pattern",
+              pattern: "solid",
+              fgColor: { argb: "FFF2F2F2" },
+            };
+          }
+        });
+
+        if (section.title === "Donation") {
+          worksheet.mergeCells(currentRow, 4, currentRow, 8);
+
+          if (rowIdx % 2 === 0) {
+            for (let extraCol = 5; extraCol <= 8; extraCol++) {
+              const extraCell = dataRow.getCell(extraCol);
+              extraCell.fill = {
+                type: "pattern",
+                pattern: "solid",
+                fgColor: { argb: "FFF2F2F2" },
+              };
+            }
+          }
+        }
+
+        currentRow++;
+      });
+
+      currentRow++;
     });
 
-    const worksheet = XLSX.utils.aoa_to_sheet(allData);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "FinancialReport");
-    XLSX.writeFile(workbook, "FinancialReport.csv");
+    worksheet.views = [{ state: "frozen", ySplit: 1 }];
+
+    let filename = "";
+    if (customRange && startDate && endDate) {
+      filename = `financial_report_${startDate}_to_${endDate}.xlsx`;
+    } else {
+      const yearsString =
+        selectedYears.length > 0 ? selectedYears.join("_") : "all";
+      filename = `financial_report_${yearsString}.xlsx`;
+    }
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    saveAs(blob, filename);
   };
 
   // CSV export function
@@ -167,7 +497,13 @@ const TreasurerReqs = () => {
     }
 
     const headers = ["Name", "Date", "Amount", "Address"];
-    const rows = donors.flatMap((donor) => {
+    const sortedDonors = [...donors].sort((a, b) => {
+      const lastNameCompare = a.last_name.localeCompare(b.last_name);
+      if (lastNameCompare !== 0) return lastNameCompare;
+      return a.first_name.localeCompare(b.first_name);
+    });
+
+    const rows = sortedDonors.flatMap((donor) => {
       const fullName = `${donor.first_name} ${donor.last_name}`;
       const fullAddressParts = [
         donor.street_address,
@@ -228,47 +564,47 @@ const TreasurerReqs = () => {
       console.log("Skipping donor fetch due to missing dates");
       return;
     }
-  
+
     const { data, error } = await supabase.rpc("get_donation_history", {
       start_date: start,
       end_date: end,
     });
-  
-  
-  if (error) {
-    console.error("Error fetching donors:", error.message);
-  } else {
-    console.log("Donors fetched:", data);
 
-    const grouped = data.reduce((acc, item) => {
-      const key = item.member_id;
-      if (!acc[key]) {
-        acc[key] = {
-          member_id: item.member_id,
-          first_name: item.first_name,
-          last_name: item.last_name,
-          street_address: item.street_address,
-          city: item.city,
-          state: item.state,
-          zip_code: item.zip_code,
-          donations: [],
-          total_donation_amount: 0,
-        };
-      }
 
-      acc[key].donations.push({
-        date: item.donation_date,
-        amount: item.donation_amount,
-      });
+    if (error) {
+      console.error("Error fetching donors:", error.message);
+    } else {
+      console.log("Donors fetched:", data);
 
-      acc[key].total_donation_amount += item.donation_amount;
+      const grouped = data.reduce((acc, item) => {
+        const key = item.member_id;
+        if (!acc[key]) {
+          acc[key] = {
+            member_id: item.member_id,
+            first_name: item.first_name,
+            last_name: item.last_name,
+            street_address: item.street_address,
+            city: item.city,
+            state: item.state,
+            zip_code: item.zip_code,
+            donations: [],
+            total_donation_amount: 0,
+          };
+        }
 
-      return acc;
-    }, {} as any);
+        acc[key].donations.push({
+          date: item.donation_date,
+          amount: item.donation_amount,
+        });
 
-    setDonors(Object.values(grouped));
-  }
-};
+        acc[key].total_donation_amount += item.donation_amount;
+
+        return acc;
+      }, {} as any);
+
+      setDonors(Object.values(grouped));
+    }
+  };
 
   const fetchPayouts = async (fromDate: string, toDate: string) => {
     const { data, error } = await supabase
@@ -402,6 +738,40 @@ const TreasurerReqs = () => {
     setGrossData(grossResults);
     setFeeData(feeResults);
 
+    const summary = {
+      membership: { total: 0, count: 0 },
+      forum: { total: 0, count: 0 },
+      donation: { total: 0, count: 0 },
+    };
+
+    for (const category of categories) {
+      let categoryTotal = 0;
+      for (const { year, month } of range) {
+        const upperCaseCategory = category.toUpperCase();
+        const key = `${upperCaseCategory}-${year}-${month}`;
+        const gross = grossResults[key] ?? 0;
+        const fee = feeResults[key] ?? 0;
+        categoryTotal += gross - fee;
+      }
+
+      const categoryKey = category.toLowerCase() as 'membership' | 'forum' | 'donation';
+      summary[categoryKey].total = categoryTotal;
+
+      const { data: countData, error: countError } = await supabase
+        .from('transactions')
+        .select('id, members_to_transactions!inner(sku, products!inner(type))', { count: 'exact', head: false })
+        .gte('date', fromDateValue)
+        .lte('date', toDateValue)
+        .eq('members_to_transactions.products.type', category.toUpperCase() as 'MEMBERSHIP' | 'FORUM' | 'DONATION');
+
+      if (!countError && countData) {
+        const uniqueTransactionIds = new Set(countData.map(t => t.id));
+        summary[categoryKey].count = uniqueTransactionIds.size;
+      }
+    }
+
+    setCategorySummary(summary);
+
     const paypal_gross: Record<string, number> = {};
     const paypal_fee: Record<string, number> = {};
     const paypal_net: Record<string, number> = {};
@@ -422,7 +792,8 @@ const TreasurerReqs = () => {
           paypal_gross[key] = g.data ?? 0;
           paypal_fee[key] = f.data ?? 0;
           paypal_net[key] = n.data ?? 0;
-          paypal_payout[key] = ppo.data ?? 0;
+          const payout = ppo.data ?? 0;
+          paypal_payout[key] = payout;
         });
       }),
     );
@@ -496,18 +867,24 @@ const TreasurerReqs = () => {
 
     setFromDate(start);
     setToDate(end);
-    setTriggerPresetReport(true); 
+    setTriggerPresetReport(true);
   };
 
   //donationRows
   React.useEffect(() => {
     if (triggerPresetReport && fromDate && toDate) {
       handleGenerateReport();
-      setTriggerPresetReport(false); 
+      setTriggerPresetReport(false);
     }
   }, [triggerPresetReport, fromDate, toDate]);
   const donationRows = React.useMemo(() => {
-    return donors.flatMap((donor) => {
+    const sortedDonors = [...donors].sort((a, b) => {
+      const lastNameCompare = a.last_name.localeCompare(b.last_name);
+      if (lastNameCompare !== 0) return lastNameCompare;
+      return a.first_name.localeCompare(b.first_name);
+    });
+
+    return sortedDonors.flatMap((donor) => {
       const fullName = `${donor.first_name} ${donor.last_name}`;
       const address = [donor.street_address, donor.city, donor.state, donor.zip_code]
         .filter(Boolean)
@@ -520,19 +897,19 @@ const TreasurerReqs = () => {
       ]);
     });
   }, [donors]);
-  
+
   React.useEffect(() => {
-    if (donors.length > 0 && monthsInRange.length > 0) {
+    if (monthsInRange.length > 0) {
       setShowReport(true);
     }
-  }, [donors, monthsInRange]);
-  
+  }, [monthsInRange]);
 
-// Generate Squarespace rows
-const squarespaceRows = categories.map((cat) => {
-  const row: string[] = [cat];
-  let ytdGross = 0;
-  let ytdFee = 0;
+
+  // Generate Squarespace rows
+  const squarespaceRows = categories.map((cat) => {
+    const row: string[] = [cat];
+    let ytdGross = 0;
+    let ytdFee = 0;
 
     monthsInRange.forEach(({ year, month }) => {
       const key = `${cat}-${year}-${month}`;
@@ -597,19 +974,19 @@ const squarespaceRows = categories.map((cat) => {
     ],
   ];
 
-// // Donation rows
-// const donationRows = donors.flatMap((donor) => {
-//   const fullName = `${donor.first_name} ${donor.last_name}`;
-//   const address = [donor.street_address, donor.city, donor.state, donor.zip_code]
-//     .filter(Boolean)
-//     .join(", ");
-//     return donor.donations.map((donation: { date: string; amount: number }) => [
-//       fullName,
-//     new Date(donation.date).toLocaleDateString(),
-//     donation.amount.toFixed(2),
-//     address,
-//   ]);
-// });
+  // // Donation rows
+  // const donationRows = donors.flatMap((donor) => {
+  //   const fullName = `${donor.first_name} ${donor.last_name}`;
+  //   const address = [donor.street_address, donor.city, donor.state, donor.zip_code]
+  //     .filter(Boolean)
+  //     .join(", ");
+  //     return donor.donations.map((donation: { date: string; amount: number }) => [
+  //       fullName,
+  //     new Date(donation.date).toLocaleDateString(),
+  //     donation.amount.toFixed(2),
+  //     address,
+  //   ]);
+  // });
 
   return (
     <div className="custom-scrollbar flex h-full w-full flex-col bg-gray-100">
@@ -668,22 +1045,29 @@ const squarespaceRows = categories.map((cat) => {
                     </button>
                   </div>
                 </div>
-                <div className="flex w-1/4 flex-row justify-between gap-2">
-                  <div className="flex w-1/2 items-end">
+                <div className="flex w-1/3 flex-row justify-between gap-2">
+                  <div className="flex w-1/3 items-end">
                     <button
                       onClick={handleGenerateReport}
-                      className="h-10 w-full cursor-pointer rounded-lg bg-blue-500 font-semibold text-white"
+                      className="h-8 w-full cursor-pointer rounded-lg bg-blue-500 text-sm font-semibold text-white"
                     >
                       Generate Report
                     </button>
                   </div>
-
-                  <div className="flex w-1/2 items-end">
+                  <div className="flex w-1/3 items-end">
                     <button
+                      className="h-8 w-full cursor-pointer rounded-lg bg-red-500 text-sm font-semibold text-white"
                       onClick={exportFullReportToCSV}
-                      className="h-10 w-full cursor-pointer rounded-lg bg-green-500 font-semibold text-white"
                     >
-                      Export as CSV
+                      Export to CSV
+                    </button>
+                  </div>
+                  <div className="flex w-1/3 items-end">
+                    <button
+                      className="h-8 w-full cursor-pointer rounded-lg bg-green-600 text-sm font-semibold text-white"
+                      onClick={exportFullReportToXLSX}
+                    >
+                      Export to XLSX
                     </button>
                   </div>
                 </div>
@@ -692,11 +1076,60 @@ const squarespaceRows = categories.map((cat) => {
               {/* <div className="relative custom-scrollbar bg-white p-4 rounded-lg overflow-auto"> */}
               {showReport && (
                 <div className="custom-scrollbar h-full w-full rounded-lg bg-white p-4 px-6">
+                  <div className="mb-4 grid grid-cols-4 gap-3">
+                    <div className="rounded-lg border border-slate-300 bg-slate-100 p-3">
+                      <h3 className="mb-1 text-xs font-semibold text-black">
+                        Total
+                      </h3>
+                      <p className="text-lg font-bold text-black">
+                        {format(
+                          categorySummary.membership.total +
+                          categorySummary.forum.total +
+                          categorySummary.donation.total
+                        )}
+                      </p>
+                      <p className="text-xs text-black">
+                        {categorySummary.membership.count +
+                          categorySummary.forum.count +
+                          categorySummary.donation.count}{" "}
+                        transactions
+                      </p>
+                    </div>
+                    <div className="rounded-lg border border-blue-300 bg-blue-100 p-3">
+                      <h3 className="mb-1 text-xs font-semibold text-black">
+                        Membership
+                      </h3>
+                      <p className="text-lg font-bold text-black">
+                        {format(categorySummary.membership.total)}
+                      </p>
+                      <p className="text-xs text-black">
+                        {categorySummary.membership.count} transactions
+                      </p>
+                    </div>
+                    <div className="rounded-lg border border-emerald-300 bg-emerald-100 p-3">
+                      <h3 className="mb-1 text-xs font-semibold text-black">
+                        Forum
+                      </h3>
+                      <p className="text-lg font-bold text-black">
+                        {format(categorySummary.forum.total)}
+                      </p>
+                      <p className="text-xs text-black">
+                        {categorySummary.forum.count} transactions
+                      </p>
+                    </div>
+                    <div className="rounded-lg border border-purple-300 bg-purple-100 p-3">
+                      <h3 className="mb-1 text-xs font-semibold text-black">
+                        Donation
+                      </h3>
+                      <p className="text-lg font-bold text-black">
+                        {format(categorySummary.donation.total)}
+                      </p>
+                      <p className="text-xs text-black">
+                        {categorySummary.donation.count} transactions
+                      </p>
+                    </div>
+                  </div>
                   <div className="custom-scrollbar relative w-full grow overflow-auto rounded-lg bg-white">
-                    <p className="mb-4">
-                      {/* Showing report from <strong>{fromDate}</strong> to{" "}
-                      <strong>{toDate}</strong> */}
-                    </p>
                     <div className="sticky left-0 z-10 pb-2">
                       <h2 className="mb-2 text-base font-semibold">
                         Squarespace
@@ -746,16 +1179,14 @@ const squarespaceRows = categories.map((cat) => {
                         </thead>
 
                         <tbody>
-                          {categories.map((cat) => (
+                          {categories.map((cat, catIndex) => (
                             <React.Fragment key={cat}>
-                              {/* Main data row */}
                               <tr>
                                 <td className="sticky left-0 z-20 border bg-gray-100 p-2 text-left font-semibold">
                                   {cat.charAt(0).toUpperCase() +
                                     cat.slice(1).toLowerCase()}
                                 </td>
-                                {monthsInRange.map(({ year, month }) => {
-                                  // Convert category to uppercase for data lookup to match existing data keys
+                                {monthsInRange.map(({ year, month }, monthIndex) => {
                                   const upperCat = cat.toUpperCase();
                                   const key = `${upperCat}-${year}-${month}`;
 
@@ -763,17 +1194,27 @@ const squarespaceRows = categories.map((cat) => {
                                   const fee = feeData[key] ?? 0;
                                   const net = gross - fee;
 
+                                  const isAlternateMonth = monthIndex % 2 === 1;
+                                  const isAlternateRow = catIndex % 2 === 1;
+
+                                  let bgColor = "";
+                                  if (isAlternateRow) {
+                                    bgColor = isAlternateMonth ? "bg-orange-100" : "bg-gray-100";
+                                  } else {
+                                    bgColor = isAlternateMonth ? "bg-orange-50" : "";
+                                  }
+
                                   return (
                                     <React.Fragment
                                       key={`${cat}-${year}-${month}`}
                                     >
-                                      <td className="border p-2">
+                                      <td className={`border border-l-2 border-l-gray-400 p-2 ${bgColor}`}>
                                         {format(gross)}
                                       </td>
-                                      <td className="border p-2">
+                                      <td className={`border p-2 ${bgColor}`}>
                                         {format(fee)}
                                       </td>
-                                      <td className="border p-2">
+                                      <td className={`border border-r-2 border-r-gray-400 p-2 ${bgColor}`}>
                                         {format(net)}
                                       </td>
                                     </React.Fragment>
@@ -785,23 +1226,21 @@ const squarespaceRows = categories.map((cat) => {
                                       grossData,
                                       cat.toUpperCase(),
                                     ) -
-                                      getCatRangeTotal(
-                                        feeData,
-                                        cat.toUpperCase(),
-                                      ),
+                                    getCatRangeTotal(
+                                      feeData,
+                                      cat.toUpperCase(),
+                                    ),
                                   )}
                                 </td>
                               </tr>
                             </React.Fragment>
                           ))}
 
-                          {/* Total Row */}
-                          <tr className="bg-gray-50 font-semibold">
+                          <tr className="font-semibold">
                             <td className="sticky left-0 z-20 border bg-gray-100 p-2 text-left font-semibold">
                               Total
                             </td>
-                            {monthsInRange.map(({ year, month }) => {
-                              // Calculate totals for each month across all categories
+                            {monthsInRange.map(({ year, month }, monthIndex) => {
                               let totalGross = 0;
                               let totalFee = 0;
                               let totalNet = 0;
@@ -815,15 +1254,17 @@ const squarespaceRows = categories.map((cat) => {
 
                               totalNet = totalGross - totalFee;
 
+                              const isAlternateMonth = monthIndex % 2 === 1;
+
                               return (
                                 <React.Fragment key={`total-${year}-${month}`}>
-                                  <td className="border bg-gray-50 p-2">
+                                  <td className={`border border-l-2 border-l-gray-400 p-2 ${isAlternateMonth ? "bg-orange-100" : "bg-gray-100"}`}>
                                     {format(totalGross)}
                                   </td>
-                                  <td className="border bg-gray-50 p-2">
+                                  <td className={`border p-2 ${isAlternateMonth ? "bg-orange-100" : "bg-gray-100"}`}>
                                     {format(totalFee)}
                                   </td>
-                                  <td className="border bg-gray-50 p-2">
+                                  <td className={`border border-r-2 border-r-gray-400 p-2 ${isAlternateMonth ? "bg-orange-100" : "bg-gray-100"}`}>
                                     {format(totalNet)}
                                   </td>
                                 </React.Fragment>
@@ -851,7 +1292,6 @@ const squarespaceRows = categories.map((cat) => {
                       </table>
                     </div>
 
-                    {/* Paypal Section */}
                     <div className="sticky left-0 z-10 bg-white pb-2">
                       <h2 className="mt-8 mb-2 text-base font-semibold">
                         PayPal
@@ -900,11 +1340,13 @@ const squarespaceRows = categories.map((cat) => {
                             <td className="sticky left-0 z-20 border bg-gray-100 p-2 font-semibold">
                               Gross
                             </td>
-                            {monthsInRange.map(({ year, month }) => {
+                            {monthsInRange.map(({ year, month }, monthIndex) => {
                               const key = `${year}-${month}`;
+                              const isAlternateMonth = monthIndex % 2 === 1;
+                              const bgColor = isAlternateMonth ? "bg-orange-50" : "";
                               return (
                                 <React.Fragment key={`gross-${year}-${month}`}>
-                                  <td className="border p-2 text-center">
+                                  <td className={`border border-l-2 border-r-2 border-l-gray-400 border-r-gray-400 p-2 text-center ${bgColor}`}>
                                     {format(paypalGross[key] ?? 0)}
                                   </td>
                                 </React.Fragment>
@@ -920,11 +1362,13 @@ const squarespaceRows = categories.map((cat) => {
                             <td className="sticky left-0 z-20 border bg-gray-100 p-2 font-semibold">
                               Fee
                             </td>
-                            {monthsInRange.map(({ year, month }) => {
+                            {monthsInRange.map(({ year, month }, monthIndex) => {
                               const key = `${year}-${month}`;
+                              const isAlternateMonth = monthIndex % 2 === 1;
+                              const bgColor = isAlternateMonth ? "bg-orange-100" : "bg-gray-100";
                               return (
                                 <React.Fragment key={`fee-${year}-${month}`}>
-                                  <td className="border p-2 text-center">
+                                  <td className={`border border-l-2 border-r-2 border-l-gray-400 border-r-gray-400 p-2 text-center ${bgColor}`}>
                                     {format(paypalFee[key] ?? 0)}
                                   </td>
                                 </React.Fragment>
@@ -936,16 +1380,18 @@ const squarespaceRows = categories.map((cat) => {
                           </tr>
 
                           {/* Row: Payout */}
-                          <tr className="bg-white font-semibold">
+                          <tr className="font-semibold">
                             <td className="sticky left-0 z-20 border bg-gray-100 p-2">
                               Payout
                             </td>
-                            {monthsInRange.map(({ year, month }) => {
+                            {monthsInRange.map(({ year, month }, monthIndex) => {
                               const key = `${year}-${month}`;
+                              const isAlternateMonth = monthIndex % 2 === 1;
+                              const bgColor = isAlternateMonth ? "bg-orange-50" : "";
                               return (
                                 <td
                                   key={`net-${year}-${month}`}
-                                  className="border p-2 text-center"
+                                  className={`border border-l-2 border-r-2 border-l-gray-400 border-r-gray-400 p-2 text-center ${bgColor}`}
                                 >
                                   {format((paypalPayout[key] ?? 0) / 100)}
                                 </td>
@@ -958,20 +1404,22 @@ const squarespaceRows = categories.map((cat) => {
                           </tr>
 
                           {/* Row: Bank Confirmation */}
-                          <tr className="bg-gray-100 font-semibold">
+                          <tr className="font-semibold">
                             <td className="sticky left-0 z-20 border bg-gray-100 p-2 font-semibold">
                               Bank Confirmation
                             </td>
-                            {monthsInRange.map(({ year, month }) => {
+                            {monthsInRange.map(({ year, month }, monthIndex) => {
                               const temporalKey = Temporal.PlainYearMonth.from({
                                 year,
                                 month,
                               }).toString();
+                              const isAlternateMonth = monthIndex % 2 === 1;
+                              const bgColor = isAlternateMonth ? "bg-orange-100" : "bg-gray-100";
                               return (
                                 <React.Fragment
                                   key={`paypal-confirm-${year}-${month}`}
                                 >
-                                  <td className="border bg-white p-2 text-center">
+                                  <td className={`border border-l-2 border-r-2 border-l-gray-400 border-r-gray-400 p-2 text-center ${bgColor}`}>
                                     <div className="flex flex-col items-center">
                                       <input
                                         type="checkbox"
@@ -1025,7 +1473,6 @@ const squarespaceRows = categories.map((cat) => {
                       </table>
                     </div>
 
-                    {/* Stripe Section */}
                     <div className="sticky left-0 z-10 bg-white pb-2">
                       <h2 className="mt-8 mb-2 text-base font-semibold">
                         Stripe
@@ -1074,13 +1521,15 @@ const squarespaceRows = categories.map((cat) => {
                             <td className="sticky left-0 z-20 border bg-gray-100 p-2 font-semibold">
                               Gross
                             </td>
-                            {monthsInRange.map(({ year, month }) => {
+                            {monthsInRange.map(({ year, month }, monthIndex) => {
                               const key = `${year}-${month}`;
+                              const isAlternateMonth = monthIndex % 2 === 1;
+                              const bgColor = isAlternateMonth ? "bg-orange-50" : "";
                               return (
                                 <React.Fragment
                                   key={`stripe-gross-${year}-${month}`}
                                 >
-                                  <td className="border p-2 text-center">
+                                  <td className={`border border-l-2 border-r-2 border-l-gray-400 border-r-gray-400 p-2 text-center ${bgColor}`}>
                                     {format(stripeGross[key] ?? 0)}
                                   </td>
                                 </React.Fragment>
@@ -1096,13 +1545,15 @@ const squarespaceRows = categories.map((cat) => {
                             <td className="sticky left-0 z-20 border bg-gray-100 p-2 font-semibold">
                               Fee
                             </td>
-                            {monthsInRange.map(({ year, month }) => {
+                            {monthsInRange.map(({ year, month }, monthIndex) => {
                               const key = `${year}-${month}`;
+                              const isAlternateMonth = monthIndex % 2 === 1;
+                              const bgColor = isAlternateMonth ? "bg-orange-100" : "bg-gray-100";
                               return (
                                 <React.Fragment
                                   key={`stripe-fee-${year}-${month}`}
                                 >
-                                  <td className="border p-2 text-center">
+                                  <td className={`border border-l-2 border-r-2 border-l-gray-400 border-r-gray-400 p-2 text-center ${bgColor}`}>
                                     {format(stripeFee[key] ?? 0)}
                                   </td>
                                 </React.Fragment>
@@ -1114,17 +1565,19 @@ const squarespaceRows = categories.map((cat) => {
                           </tr>
 
                           {/* Row: Payout */}
-                          <tr className="bg-white font-semibold">
+                          <tr className="font-semibold">
                             <td className="sticky left-0 z-20 border bg-gray-100 p-2">
                               Payout
                             </td>
-                            {monthsInRange.map(({ year, month }) => {
+                            {monthsInRange.map(({ year, month }, monthIndex) => {
                               const key = `${year}-${month}`;
+                              const isAlternateMonth = monthIndex % 2 === 1;
+                              const bgColor = isAlternateMonth ? "bg-orange-50" : "";
                               return (
                                 <React.Fragment
                                   key={`stripe-net-${year}-${month}`}
                                 >
-                                  <td className="border p-2 text-center">
+                                  <td className={`border border-l-2 border-r-2 border-l-gray-400 border-r-gray-400 p-2 text-center ${bgColor}`}>
                                     {format((stripePayout[key] ?? 0) / 100)}
                                   </td>
                                 </React.Fragment>
@@ -1135,21 +1588,22 @@ const squarespaceRows = categories.map((cat) => {
                             </td>
                           </tr>
 
-                          {/* Row: Bank Confirmation */}
-                          <tr className="bg-gray-100 font-semibold">
+                          <tr className="font-semibold">
                             <td className="sticky left-0 z-20 border bg-gray-100 p-2">
                               Bank Confirmation
                             </td>
-                            {monthsInRange.map(({ year, month }) => {
+                            {monthsInRange.map(({ year, month }, monthIndex) => {
                               const temporalKey = Temporal.PlainYearMonth.from({
                                 year,
                                 month,
                               }).toString();
+                              const isAlternateMonth = monthIndex % 2 === 1;
+                              const bgColor = isAlternateMonth ? "bg-orange-100" : "bg-gray-100";
                               return (
                                 <React.Fragment
                                   key={`stripe-confirm-${year}-${month}`}
                                 >
-                                  <td className="border bg-white p-2 text-center">
+                                  <td className={`border border-l-2 border-r-2 border-l-gray-400 border-r-gray-400 p-2 text-center ${bgColor}`}>
                                     <div className="flex flex-col items-center">
                                       <input
                                         type="checkbox"
@@ -1197,117 +1651,14 @@ const squarespaceRows = categories.map((cat) => {
                                 </React.Fragment>
                               );
                             })}
-                            {/* YTD Total */}
                             <td className="sticky right-0 border bg-gray-100 p-2 font-bold"></td>
                           </tr>
-                        </tbody>
-                      </table>
-                    </div>
-
-                    {/*  Annual Donation Section */}
-
-                    <div className="sticky left-0 z-10 bg-white pb-2">
-                      <h2 className="mt-8 mb-2 text-base font-semibold">
-                        Annual Donation
-                      </h2>
-                    </div>
-                    <div className="sticky left-0 overflow-auto">
-                      <table className="w-full table-fixed border bg-white text-sm">
-                        <thead>
-                          <tr className="bg-gray-100">
-                            <th className="border p-2 font-bold">Donor</th>
-                            <th className="border p-2 font-bold">
-                              Gift Totals
-                            </th>
-                            <th className="border p-2 font-bold">Date</th>
-                            <th className="border p-2 font-bold">Amount</th>
-                            <th className="border p-2 font-bold">Total</th>
-                            <th className="border p-2 font-bold">Address</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {donors.length > 0 ? (
-                            donors.map((donor, idx) => {
-                              const fullName = `${donor.first_name} ${donor.last_name}`;
-                              const fullAddressParts = [
-                                donor.street_address,
-                                donor.city,
-                                donor.state,
-                                donor.zip_code,
-                              ].filter(Boolean);
-                              const fullAddress = fullAddressParts.join(", ");
-
-                              const total = new Intl.NumberFormat("en-US", {
-                                style: "currency",
-                                currency: "USD",
-                              }).format(donor.total_donation_amount || 0);
-
-                              return (
-                                <React.Fragment key={idx}>
-                                  {/* Donor summary row */}
-                                  <tr className="bg-white font-semibold">
-                                    <td className="border p-2">{fullName}</td>
-                                    <td className="border p-2">{total}</td>
-                                    <td className="border p-2"></td>
-                                    <td className="border p-2"></td>
-                                    <td className="border p-2">{total}</td>
-                                    <td className="border p-2">
-                                      {fullAddress || "—"}
-                                    </td>
-                                  </tr>
-
-                                  {/* Donation rows */}
-                                  {console.log(
-                                    "🔍 donor.donations",
-                                    donor.donations,
-                                  )}
-                                  {donor.donations?.map(
-                                    (
-                                      donation: {
-                                        date: string;
-                                        amount: number;
-                                      },
-                                      i: number,
-                                    ) => (
-                                      <tr key={`${donor.member_id}-${i}`}>
-                                        <td className="border p-2"></td>
-                                        <td className="border p-2"></td>
-                                        <td className="border p-2 text-center">
-                                          {new Date(
-                                            donation.date,
-                                          ).toLocaleDateString()}
-                                        </td>
-                                        <td className="border p-2">
-                                          {new Intl.NumberFormat("en-US", {
-                                            style: "currency",
-                                            currency: "USD",
-                                          }).format(donation.amount || 0)}
-                                        </td>
-                                        <td className="border p-2"></td>
-                                        <td className="border p-2"></td>
-                                      </tr>
-                                    ),
-                                  )}
-                                </React.Fragment>
-                              );
-                            })
-                          ) : (
-                            <tr>
-                              <td
-                                colSpan={6}
-                                className="border p-2 text-center text-gray-500"
-                              >
-                                No donor data found.
-                              </td>
-                            </tr>
-                          )}
                         </tbody>
                       </table>
                     </div>
                   </div>
                 </div>
               )}
-              {/* </div> */}
             </div>
           </div>
         </div>

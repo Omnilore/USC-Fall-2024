@@ -39,3 +39,9 @@ next-env.d.ts
 .vscode
 
 .env
+
+# scripts directory (contains staging seed data)
+/scripts
+
+# Ignore documentation files
+*.docx

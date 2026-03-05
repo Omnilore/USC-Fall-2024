@@ -1,3 +1,32 @@
+// Ensure server-safe localStorage so any library call during SSR doesn't crash.
+const serverStorage = {
+  getItem: (_key: string) => null,
+  setItem: (_key: string, _value: string) => {},
+  removeItem: (_key: string) => {},
+  clear: () => {},
+  key: (_index: number) => null,
+  length: 0,
+};
+
+if (typeof window === "undefined") {
+  try {
+    // @ts-expect-error - deleting built-in localStorage
+    delete globalThis.localStorage;
+  } catch {
+
+  }
+
+  try {
+    globalThis.localStorage = serverStorage;
+  } catch {
+    Object.defineProperty(globalThis, "localStorage", {
+      value: serverStorage,
+      configurable: true,
+      writable: true,
+    });
+  }
+}
+
 import localFont from "next/font/local";
 import type { Metadata } from "next";
 import { Toaster } from "sonner";
@@ -28,6 +57,7 @@ export default function RootLayout({
     <html lang="en">
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        suppressHydrationWarning
       >
         <main>{children}</main>
         <Toaster

@@ -26,6 +26,8 @@ export default function ConflictsPage() {
   );
   const [isPanelOpen, setIsPanelOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [showResolved, setShowResolved] = useState(false);
+
   const tableName = "member_conflicts";
 
   const filteredEntries = useMemo(() => {
@@ -60,21 +62,23 @@ export default function ConflictsPage() {
       setIsLoading(true);
       const { data, primaryKeys } = await queryTableWithPrimaryKey(tableName);
 
+      // Filter based on toggle
+      const filteredData = data.filter((entry) => 
+        showResolved ? entry.resolved : !entry.resolved
+      );
+
       // Get all unique member IDs from the conflicts
       const memberIds = Array.from(
         new Set(
-          data
-            .filter((entry) => !entry.resolved)
-            .flatMap((entry) => [
-              entry.first_member_id,
-              entry.second_member_id,
-            ]),
+          filteredData.flatMap((entry) => [
+            entry.first_member_id,
+            entry.second_member_id,
+          ]),
         ),
       ).filter(Boolean);
 
       let memberMap: Record<string, string> = {};
       if (memberIds.length > 0) {
-        // Use the reusable function to fetch member names
         const members = await getMemberNamesByIds(memberIds);
         memberMap = Object.fromEntries(
           members.map((m: any) => [
@@ -84,18 +88,16 @@ export default function ConflictsPage() {
         );
       }
 
-      // Attach names to each conflict entry
+      // Attach names - NO metadata needed!
       setEntries(
-        data
-          .filter((entry) => !entry.resolved)
-          .map((entry) => ({
-            first_member_id: entry.first_member_id,
-            first_member_name: memberMap[entry.first_member_id] || "",
-            second_member_id: entry.second_member_id,
-            second_member_name: memberMap[entry.second_member_id] || "",
-            resolved: entry.resolved,
-            ...entry,
-          })),
+        filteredData.map((entry) => ({
+          first_member_id: entry.first_member_id,
+          first_member_name: memberMap[entry.first_member_id] || "",
+          second_member_id: entry.second_member_id,
+          second_member_name: memberMap[entry.second_member_id] || "",
+          resolved: entry.resolved,
+          ...entry,
+        })),
       );
       setPrimaryKeys(primaryKeys ?? []);
     } catch (error) {
@@ -130,8 +132,11 @@ export default function ConflictsPage() {
     };
 
     setup().catch(console.error);
-    fetchEntries();
   }, []);
+
+  useEffect(() => {
+    fetchEntries();
+  }, [showResolved]);
 
   return (
     <div className="flex h-full w-full flex-col bg-gray-100">
@@ -146,9 +151,26 @@ export default function ConflictsPage() {
           </div>
         ) : (
           <div className="flex h-full w-full flex-col items-center gap-3 px-4 pt-4">
-            {entries.length > 0 && (
-              <SearchInput query={query} setQuery={setQuery} />
-            )}
+            <div className="flex w-full items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={showResolved}
+                    onChange={(e) => setShowResolved(e.target.checked)}
+                    className="h-4 w-4"
+                  />
+                  <span className="text-sm font-medium">
+                    Show Resolved Conflicts
+                  </span>
+                </label>
+              </div>
+              {entries.length > 0 && (
+                <div className="flex-1 max-w-md">
+                  <SearchInput query={query} setQuery={setQuery} />
+                </div>
+              )}
+            </div>
 
             {primaryKeys && entries.length > 0 && (
               <div className="w-full grow overflow-y-auto">
@@ -160,6 +182,7 @@ export default function ConflictsPage() {
                   primaryKeys={primaryKeys}
                   adminTable={true}
                   showImages={false}
+                  selectable={true}
                 />
               </div>
             )}
@@ -167,7 +190,9 @@ export default function ConflictsPage() {
             {entries.length === 0 && (
               <div className="flex h-full w-full items-center justify-center">
                 <div className="text-lg font-bold">
-                  No unresolved conflicts found
+                  {showResolved 
+                    ? "No resolved conflicts found" 
+                    : "No unresolved conflicts found"}
                 </div>
               </div>
             )}
@@ -175,10 +200,14 @@ export default function ConflictsPage() {
             {selectedRow && (
               <ResolveConflictPanel
                 isOpen={isPanelOpen}
-                onClose={() => setIsPanelOpen(false)}
+                onClose={() => {
+                  setIsPanelOpen(false);
+                  setSelectedRow(null);
+                }}
                 firstMemberId={selectedRow.first_member_id}
                 secondMemberId={selectedRow.second_member_id}
                 refresh={fetchEntries}
+                isResolved={showResolved}
               />
             )}
           </div>

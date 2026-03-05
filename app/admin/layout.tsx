@@ -50,18 +50,23 @@ export default function AdminLayout({
   }, []);
 
   useEffect(() => {
-    localStorage.setItem("activeReportTab", activeReportTab);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("activeReportTab", activeReportTab);
+    }
   }, [activeReportTab]);
 
   const handleReportTabClick = (tab: string) => {
     setActiveReportTab(tab);
     setShowSubMenu(true);
-    router.push(`/admin/reports/${tab.toLowerCase()}`);
+    // Convert "Ad-Hoc" to "adhoc" for the route
+    const route = tab === "Ad-Hoc" ? "adhoc" : tab.toLowerCase();
+    router.push(`/admin/reports/${route}`);
   };
 
   useEffect(() => {
     router.prefetch("/admin/tables");
     router.prefetch("/admin/reports");
+    router.prefetch("/admin/reports/audit");
     router.prefetch("/admin/conflicts");
   }, [router]);
 
@@ -95,7 +100,7 @@ export default function AdminLayout({
               <ReportsButton />
               {(showSubMenu || activeReportTab !== "") && (
                 <div className="flex flex-col gap-1 pl-6">
-                  {["Membership", "Forum", "Donation", "Financial"].map(
+                  {["Membership", "Forum", "Donation", "Financial", "Transactions", "Ad-Hoc", "Audit"].map(
                     (tab) => (
                       <button
                         key={tab}

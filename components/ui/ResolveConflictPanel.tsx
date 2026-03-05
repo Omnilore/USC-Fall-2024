@@ -16,6 +16,7 @@ interface ResolveConflictPanelProps {
   firstMemberId: number;
   secondMemberId: number;
   refresh: () => void;
+  isResolved?: boolean;
 }
 
 export default function ResolveConflictPanel({
@@ -24,6 +25,7 @@ export default function ResolveConflictPanel({
   firstMemberId,
   secondMemberId,
   refresh,
+  isResolved = false,
 }: ResolveConflictPanelProps) {
   const [fields, setFields] = useState<any[]>([]);
   const [member1, setMember1] = useState<SupabaseMember | null>(null);
@@ -55,7 +57,7 @@ export default function ResolveConflictPanel({
             enumValues: details.enumValues || [],
           }),
         );
-        setFields(fieldList); // <--- this line stores the result
+        setFields(fieldList);
       }
     };
     fetchSchema();
@@ -68,7 +70,6 @@ export default function ResolveConflictPanel({
   }, [splitView]);
 
   useEffect(() => {
-    console.log("calling fetchMembers", isOpen, firstMemberId, secondMemberId);
     const fetchMembers = async () => {
       const data1 = await getRowById("members", firstMemberId);
       const data2 = await getRowById("members", secondMemberId);
@@ -83,35 +84,20 @@ export default function ResolveConflictPanel({
 
       Object.entries(data1).forEach(([key, val1]) => {
         const val2 = data2[key as keyof typeof data2];
-
-        // Strict equality for primitives, including 0, false, etc.
         const sameValue = val1 === val2;
-
-        // Both empty string (not null/undefined)
         const bothEmptyString = val1 === "" && val2 === "";
-
-        // Both null
         const bothNull = val1 === null && val2 === null;
-
-        // Both undefined
         const bothUndefined = val1 === undefined && val2 === undefined;
-
-        // Consider resolved if strictly equal, or both empty string, or both null, or both undefined
         const isResolved =
           sameValue || bothEmptyString || bothNull || bothUndefined;
 
         defaultResolved[key] = isResolved ? String(val1 ?? "") : "";
         defaultResolvedFields[key] = isResolved;
         defaultOpenFields[key] = !isResolved;
-        // console.log(`Field ${key}: isResolved=${isResolved}, val1=${val1}, val2=${val2}`);
       });
-      // console.log("defaultResolved", defaultResolved);
-      // console.log("defaultResolvedFields", defaultResolvedFields);
-      // console.log("defaultOpenFields", defaultOpenFields);
 
       setResolvedValues(defaultResolved);
       setResolvedFields(defaultResolvedFields);
-      // console.log("setResolvedFields in fetchMembers");
       setOpenFields(defaultOpenFields);
     };
 
@@ -123,16 +109,11 @@ export default function ResolveConflictPanel({
       setResolvedValues({});
       setCustomFields({});
       setResolvedFields({});
-      // console.log("setResolvedFields in fetchMembers isOpen");
       setOpenFields({});
       setMergeView(false);
       setSplitView(false);
     }
-  }, [isOpen, firstMemberId, secondMemberId]);
-
-  useEffect(() => {
-    console.log("resolvedValues", resolvedValues);
-  }, [resolvedValues]);
+  }, [isOpen, firstMemberId, secondMemberId, isResolved]);
 
   const handleSelection = (
     key: string,
@@ -140,7 +121,6 @@ export default function ResolveConflictPanel({
   ) => {
     setResolvedValues((prev) => ({ ...prev, [key]: value }));
     setResolvedFields((prev) => ({ ...prev, [key]: true }));
-    console.log("setResolvedFields in handleSelection");
     setOpenFields((prev) => ({ ...prev, [key]: false }));
     setCustomFields((prev) => ({ ...prev, [key]: false }));
   };
@@ -149,11 +129,9 @@ export default function ResolveConflictPanel({
     setResolvedValues((prev) => ({ ...prev, [key]: value }));
     const isValid = typeof value === "string" && value.trim().length > 0;
     setResolvedFields((prev) => ({ ...prev, [key]: isValid }));
-    console.log("setResolvedFields in updateCustomValue");
   };
 
   const confirmCustom = (key: string) => {
-    console.log("confirmCustom");
     if (resolvedValues[key]?.toString().trim()) {
       setOpenFields((prev) => ({ ...prev, [key]: false }));
     }
@@ -173,6 +151,126 @@ export default function ResolveConflictPanel({
     return d instanceof Date && !isNaN(d.getTime());
   }
 
+  // VIEW-ONLY MODE for resolved conflicts
+  if (isResolved) {
+    return (
+      <>
+        <div
+          className="fixed inset-0 z-40 bg-white/50 transition-opacity"
+          onClick={onClose}
+        ></div>
+
+        <div className="fixed right-0 bottom-0 z-50 h-[90%] w-1/3 transform rounded-tl-xl border bg-white shadow-lg translate-x-0 transition-transform duration-250">
+          <div className="flex h-full flex-col">
+            <div className="flex flex-col border-b p-4 bg-green-50">
+              <div className="flex justify-between items-start">
+                <div className="flex flex-col gap-2 flex-1">
+                  <div className="text-medium inline-block max-w-fit rounded-3xl bg-green-200 px-4 py-1 italic">
+                    <span className="font-semibold">✓ Resolved Conflict</span>
+                  </div>
+                  <div className="text-sm text-gray-600">
+                    <div><strong>Members:</strong> {firstMemberId} and {secondMemberId}</div>
+                  </div>
+                </div>
+                <button
+                  className="inline-block text-xl text-[#616161]"
+                  onClick={onClose}
+                >
+                  ✖
+                </button>
+              </div>
+            </div>
+
+            <div
+              ref={scrollContainerRef}
+              className="custom-scrollbar flex h-full w-full flex-col gap-4 overflow-hidden overflow-y-auto p-8"
+            >
+              <span className="text-gray-600 italic">
+                This conflict has been resolved and is view-only.
+              </span>
+              {fields
+                .filter(
+                  (field) =>
+                    field.name !== "updated_at" &&
+                    field.name !== "created_at" &&
+                    field.name !== "id",
+                )
+                .map((field) => {
+                  const key = field.name;
+                  const val1 = member1[key as keyof SupabaseMember];
+                  const val2 = member2[key as keyof SupabaseMember];
+                  const isEqual = String(val1) === String(val2);
+                  const bgColor = isEqual ? "bg-[#DAFBC9]" : "bg-gray-100";
+
+                  return (
+                    <div key={key} className={`rounded p-3 ${bgColor}`}>
+                      <label className="mb-2 block font-semibold capitalize">
+                        {key}
+                      </label>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="rounded border bg-white p-1">
+                          {val1 === null || val1 === "" ? (
+                            <span className="text-gray-400">NULL</span>
+                          ) : typeof val1 === "boolean" ? (
+                            String(val1)
+                          ) : (
+                            (val1 ?? "—")
+                          )}
+                        </div>
+                        <div className="rounded border bg-white p-1">
+                          {val2 === null || val2 === "" ? (
+                            <span className="text-gray-400">NULL</span>
+                          ) : typeof val2 === "boolean" ? (
+                            String(val2)
+                          ) : (
+                            (val2 ?? "—")
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              <div className="flex gap-2">
+                <button
+                  className="text-medium inline-block max-h-fit max-w-fit items-center justify-center rounded-lg bg-gray-100 px-3 py-1"
+                  onClick={onClose}
+                >
+                  Close
+                </button>
+                <button
+                  className="text-medium inline-block max-h-fit max-w-fit items-center justify-center rounded-lg bg-yellow-200 px-3 py-1 font-semibold hover:bg-yellow-300"
+                  onClick={async () => {
+                    if (confirm("Are you sure you want to un-resolve this conflict? It will move back to the unresolved list.")) {
+                      const { unresolve_member_conflict } = await import("@/app/api/cron/src/supabase/resolve-conflicts");
+                      
+                      toast.promise(
+                        unresolve_member_conflict(firstMemberId, secondMemberId).then(() => {
+                          onClose();
+                          refresh();
+                        }),
+                        {
+                          loading: "Un-resolving conflict...",
+                          success: "Conflict reopened successfully!",
+                          error: (error) => {
+                            console.error(error);
+                            return `Error un-resolving conflict. ${error.message}`;
+                          },
+                        },
+                      );
+                    }
+                  }}
+                >
+                  Un-Resolve
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </>
+    );
+  }
+
+  // NORMAL EDITING MODE (existing logic continues)
   return (
     <>
       {isOpen && (
@@ -257,9 +355,6 @@ export default function ResolveConflictPanel({
                             <div className="truncate text-sm font-medium">
                               {key}
                             </div>
-                            {/* <label className="mb-2 block font-semibold capitalize">
-                              <div className="text-sm font-medium truncate">{key}</div>
-                            </label> */}
                             <MergeInputField
                               fieldName={key}
                               fieldType={field.type}
@@ -288,9 +383,6 @@ export default function ResolveConflictPanel({
                             <div className="truncate text-sm font-medium">
                               {key}
                             </div>
-                            {/* <label className="mb-2 block font-semibold capitalize">
-                              <div className="text-sm font-medium truncate">{key}</div>
-                            </label> */}
                             <MergeInputField
                               fieldName={key}
                               fieldType={field.type}

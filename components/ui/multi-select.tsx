@@ -58,7 +58,7 @@ const multiSelectVariants = cva(
  */
 interface MultiSelectProps
   extends React.ButtonHTMLAttributes<HTMLButtonElement>,
-    VariantProps<typeof multiSelectVariants> {
+  VariantProps<typeof multiSelectVariants> {
   /**
    * An array of option objects to be displayed in the multi-select component.
    * Each option object has a label, value, and an optional icon.
@@ -80,6 +80,12 @@ interface MultiSelectProps
 
   /** The default selected values when the component mounts. */
   defaultValue?: string[];
+
+  /**
+   * Controlled selected values. If provided, the component will reflect this value
+   * and ignore internal state for display (still calls onValueChange on user actions).
+   */
+  value?: string[];
 
   /**
    * Placeholder text to be displayed when no values are selected.
@@ -129,6 +135,7 @@ export const MultiSelect = React.forwardRef<
       onValueChange,
       variant,
       defaultValue = [],
+      value,
       placeholder = "Select options",
       animation = 0,
       maxCount = 3,
@@ -140,7 +147,13 @@ export const MultiSelect = React.forwardRef<
     ref,
   ) => {
     const [selectedValues, setSelectedValues] =
-      React.useState<string[]>(defaultValue);
+      React.useState<string[]>(value ?? defaultValue);
+
+    React.useEffect(() => {
+      if (Array.isArray(value)) {
+        setSelectedValues(value);
+      }
+    }, [value]);
     const [isPopoverOpen, setIsPopoverOpen] = React.useState(false);
     const [isAnimating, setIsAnimating] = React.useState(false);
 

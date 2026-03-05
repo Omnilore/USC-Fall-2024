@@ -1,7 +1,8 @@
 "use client";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, Fragment } from "react";
 import UserIcon from "@/components/assets/user-icon.png";
 import { MoonLoader } from "react-spinners";
+import { Copy } from "lucide-react";
 
 interface TableComponentProps {
   entries: Record<string, any>[];
@@ -29,6 +30,14 @@ const formatPhoneNumber = (phoneNumberString: string) => {
 
   // Return the original value if it doesn't match the expected format
   return phoneNumberString;
+};
+
+// Function to copy text to clipboard
+const copyToClipboard = (text: string, e?: React.MouseEvent) => {
+  if (e) {
+    e.stopPropagation(); // Prevent row selection when clicking copy button
+  }
+  navigator.clipboard.writeText(text);
 };
 
 const TableComponent = ({
@@ -111,14 +120,32 @@ const TableComponent = ({
             <thead className="bg-gray-100">
               <tr>
                 {(() => {
-                  let leftOffset = 0;
+                  const headerCells = [];
 
-                  return (
-                    <>
-                      {adminTable && (
+                  if (adminTable) {
+                    headerCells.push(
+                      <th
+                        key="header-select"
+                        ref={(el) => {
+                          headerRefs.current[0] = el;
+                        }}
+                        className="sticky top-0 z-20 bg-gray-100 px-4 py-2 outline-hidden"
+                        style={{
+                          left: '0px',
+                          boxShadow: "inset 0 0 0 0.5px #e5e7eb",
+                        }}
+                      >
+                        Select
+                      </th>
+                    );
+
+                    primaryKeys.forEach((key, colIndex) => {
+                      const leftOffset = columnWidths.slice(0, colIndex + 1).reduce((sum, w) => sum + (w || 50), 0);
+                      headerCells.push(
                         <th
+                          key={key}
                           ref={(el) => {
-                            headerRefs.current[0] = el;
+                            headerRefs.current[colIndex + 1] = el;
                           }}
                           className="sticky top-0 z-20 bg-gray-100 px-4 py-2 outline-hidden"
                           style={{
@@ -126,46 +153,30 @@ const TableComponent = ({
                             boxShadow: "inset 0 0 0 0.5px #e5e7eb",
                           }}
                         >
-                          Select
+                          {key}
                         </th>
-                      )}
+                      );
+                    });
+                  }
 
-                      {adminTable &&
-                        primaryKeys.map((key, colIndex) => {
-                          leftOffset += columnWidths[colIndex] || 50;
+                  if (entries.length > 0) {
+                    Object.keys(entries[0])
+                      .filter((name) => !primaryKeys.includes(name))
+                      .forEach((columnName) => {
+                        headerCells.push(
+                          <th
+                            key={columnName}
+                            className="sticky top-0 z-10 bg-gray-100 px-4 py-2 outline-hidden"
+                            style={{ boxShadow: "inset 0 0 0 0.5px #e5e7eb" }}
+                          >
+                            {columnName}
+                          </th>
+                        );
+                      });
+                  }
 
-                          return (
-                            <th
-                              key={key}
-                              ref={(el) => {
-                                headerRefs.current[colIndex + 1] = el;
-                              }}
-                              className="sticky top-0 z-20 bg-gray-100 px-4 py-2 outline-hidden"
-                              style={{
-                                left: `${leftOffset}px`,
-                                boxShadow: "inset 0 0 0 0.5px #e5e7eb",
-                              }}
-                            >
-                              {key}
-                            </th>
-                          );
-                        })}
-                    </>
-                  );
+                  return headerCells;
                 })()}
-
-                {entries.length > 0 &&
-                  Object.keys(entries[0])
-                    .filter((name) => !primaryKeys.includes(name))
-                    .map((columnName) => (
-                      <th
-                        key={columnName}
-                        className="sticky top-0 z-10 bg-gray-100 px-4 py-2 outline-hidden"
-                        style={{ boxShadow: "inset 0 0 0 0.5px #e5e7eb" }}
-                      >
-                        {columnName}
-                      </th>
-                    ))}
               </tr>
             </thead>
             <tbody>
@@ -184,141 +195,160 @@ const TableComponent = ({
                     (key) => localSelectedRow[key] === item[key],
                   );
 
+                // Create a unique key using primary keys or fallback to index
+                const uniqueKey = primaryKeys.length > 0
+                  ? primaryKeys.map(key => item[key] ?? 'null').join('-') + `-${index}`
+                  : `row-${index}`;
+
                 return (
                   <tr
-                    key={index}
-                    className={`group cursor-pointer ${
-                      hasIssue
-                        ? "bg-red-50"
-                        : isSelected
-                          ? "bg-gray-100"
-                          : "bg-white group-hover:bg-gray-50"
-                    }`}
+                    key={uniqueKey}
+                    className={`group cursor-pointer ${hasIssue
+                      ? "bg-red-50"
+                      : isSelected
+                        ? "bg-gray-100"
+                        : "bg-white group-hover:bg-gray-50"
+                      }`}
                     onClick={() => handleRowClick(item)}
                   >
                     {(() => {
-                      let leftOffset = 0;
+                      const bodyCells = [];
 
-                      return (
-                        <>
-                          {/* Select body */}
-                          {adminTable && (
+                      if (adminTable) {
+                        bodyCells.push(
+                          <td
+                            key={`${uniqueKey}-select`}
+                            className={`sticky z-10 w-10 px-4 py-2 text-center ${hasIssue
+                                ? "bg-red-50"
+                                : isSelected
+                                  ? "bg-gray-100"
+                                  : "bg-white group-hover:bg-gray-50"
+                              }`}
+                            style={{
+                              left: '0px',
+                              boxShadow: "inset 0 0 0 0.5px #e5e7eb",
+                              outline: "none",
+                            }}
+                          >
+                            <span
+                              className="absolute top-0 -left-[1px] h-full w-[1px] bg-gray-200"
+                              aria-hidden="true"
+                            />
+                            <input
+                              type="radio"
+                              name="row-selection"
+                              checked={!!isSelected}
+                              onClick={(e) => e.stopPropagation()}
+                              onChange={() => handleRowClick(item)}
+                            />
+                          </td>
+                        );
+
+                        primaryKeys.forEach((key, colIndex) => {
+                          const leftOffset = columnWidths.slice(0, colIndex + 1).reduce((sum, w) => sum + (w || 50), 0);
+                          bodyCells.push(
                             <td
-                              className={`sticky z-10 w-10 px-4 py-2 text-center ${
-                                hasIssue
+                              key={`${uniqueKey}-${key}`}
+                              className={`sticky z-10 px-4 py-2 ${hasIssue
                                   ? "bg-red-50"
                                   : isSelected
                                     ? "bg-gray-100"
                                     : "bg-white group-hover:bg-gray-50"
-                              }`}
+                                }`}
                               style={{
                                 left: `${leftOffset}px`,
                                 boxShadow: "inset 0 0 0 0.5px #e5e7eb",
-                                outline: "none",
                               }}
                             >
-                              <span
-                                className="absolute top-0 -left-[1px] h-full w-[1px] bg-gray-200"
-                                aria-hidden="true"
-                              />
-
-                              <input
-                                type="radio"
-                                name="row-selection"
-                                checked={!!isSelected}
-                                onClick={(e) => e.stopPropagation()}
-                                onChange={() => handleRowClick(item)}
-                              />
+                              {item[key] ?? ""}
                             </td>
-                          )}
+                          );
+                        });
+                      }
 
-                          {/* Primary keys body */}
-                          {adminTable &&
-                            primaryKeys.map((key, colIndex) => {
-                              leftOffset += columnWidths[colIndex] || 50;
-                              return (
-                                <td
-                                  key={key}
-                                  className={`sticky z-10 px-4 py-2 ${hasIssue ? "bg-red-50" : isSelected ? "bg-gray-100" : "bg-white group-hover:bg-gray-50"}`}
-                                  style={{
-                                    left: `${leftOffset}px`,
-                                    boxShadow: "inset 0 0 0 0.5px #e5e7eb",
-                                  }}
-                                >
-                                  {item[key] ?? ""}
-                                </td>
-                              );
-                            })}
-                        </>
-                      );
-                    })()}
-
-                    <>
-                      {Object.keys(item)
+                      Object.keys(item)
                         .filter((name) => !primaryKeys.includes(name))
-                        .map((columnName) =>
-                          showImages &&
-                          (columnName === "Photo" ||
-                            columnName === "photo_link") ? (
-                            <td
-                              key={columnName}
-                              className={`px-4 py-2 ${
-                                hasIssue
-                                  ? "bg-red-50"
-                                  : isSelected
-                                    ? "bg-gray-100"
-                                    : "bg-white group-hover:bg-gray-50"
-                              }`}
-                              style={{
-                                boxShadow: "inset 0 0 0 0.5px #e5e7eb",
-                                outline: "none",
-                              }}
-                            >
-                              <div className="h-12 w-12 overflow-hidden rounded-full border border-gray-300">
-                                <img
-                                  src={item[columnName] || UserIcon.src}
-                                  alt=""
-                                  className="h-full w-full object-cover"
-                                />
-                              </div>
-                            </td>
-                          ) : (
-                            <td
-                              key={columnName}
-                              className={`px-4 py-2 ${
-                                hasIssue
-                                  ? "bg-red-50"
-                                  : isSelected
-                                    ? "bg-gray-100"
-                                    : "bg-white group-hover:bg-gray-50"
-                              } relative ${typeof item[columnName] === "object" ? "max-w-60 overflow-auto" : ""}`}
-                              style={{
-                                boxShadow: "inset 0 0 0 0.5px #e5e7eb",
-                                outline: "none",
-                              }}
-                            >
-                              <div
-                                className={`${typeof item[columnName] === "object" ? "max-h-20" : ""}`}
+                        .forEach((columnName) => {
+                          if (showImages && (columnName === "Photo" || columnName === "photo_link")) {
+                            bodyCells.push(
+                              <td
+                                key={columnName}
+                                className={`px-4 py-2 ${hasIssue
+                                    ? "bg-red-50"
+                                    : isSelected
+                                      ? "bg-gray-100"
+                                      : "bg-white group-hover:bg-gray-50"
+                                  }`}
+                                style={{
+                                  boxShadow: "inset 0 0 0 0.5px #e5e7eb",
+                                  outline: "none",
+                                }}
                               >
-                                {typeof item[columnName] === "object" &&
-                                item[columnName] !== null
-                                  ? JSON.stringify(
-                                      item[columnName],
-                                      undefined,
-                                      1,
-                                    )
-                                  : typeof item[columnName] === "boolean"
-                                    ? item[columnName].toString()
-                                    : columnName
-                                          .toLowerCase()
-                                          .includes("phone") && item[columnName]
-                                      ? formatPhoneNumber(item[columnName])
-                                      : item[columnName]}
-                              </div>
-                            </td>
-                          ),
-                        )}
-                    </>
+                                <div className="h-12 w-12 overflow-hidden rounded-full border border-gray-300">
+                                  <img
+                                    src={item[columnName] || UserIcon.src}
+                                    alt=""
+                                    className="h-full w-full object-cover"
+                                  />
+                                </div>
+                              </td>
+                            );
+                          } else {
+                            // Check if this is an email or phone column that should have copy functionality
+                            const isEmailColumn = columnName.toLowerCase() === "email";
+                            const isPhoneColumn = columnName.toLowerCase().includes("phone");
+                            const hasCopyableValue = (isEmailColumn || isPhoneColumn) && item[columnName];
+                            
+                            bodyCells.push(
+                              <td
+                                key={columnName}
+                                className={`px-4 py-2 ${hasIssue
+                                    ? "bg-red-50"
+                                    : isSelected
+                                      ? "bg-gray-100"
+                                      : "bg-white group-hover:bg-gray-50"
+                                  } relative ${typeof item[columnName] === "object"
+                                    ? "max-w-60 overflow-auto"
+                                    : ""
+                                  }`}
+                                style={{
+                                  boxShadow: "inset 0 0 0 0.5px #e5e7eb",
+                                  outline: "none",
+                                }}
+                              >
+                                <div
+                                  className={`flex items-center gap-2 ${typeof item[columnName] === "object"
+                                      ? "max-h-20"
+                                      : ""
+                                    }`}
+                                >
+                                  {typeof item[columnName] === "object" &&
+                                    item[columnName] !== null
+                                    ? JSON.stringify(item[columnName], undefined, 1)
+                                    : typeof item[columnName] === "boolean"
+                                      ? item[columnName].toString()
+                                      : columnName.toLowerCase().includes("phone") &&
+                                        item[columnName]
+                                        ? formatPhoneNumber(item[columnName])
+                                        : item[columnName]}
+                                  {hasCopyableValue && (
+                                    <button
+                                      onClick={(e) => copyToClipboard(item[columnName], e)}
+                                      className="flex-shrink-0 text-gray-400 hover:text-gray-600 transition-colors"
+                                      title={`Copy ${isEmailColumn ? 'email' : 'phone number'}`}
+                                      aria-label={`Copy ${isEmailColumn ? 'email' : 'phone number'}`}
+                                    >
+                                      <Copy className="h-4 w-4" />
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                            );
+                          }
+                        });
+
+                      return bodyCells;
+                    })()}
                   </tr>
                 );
               })}

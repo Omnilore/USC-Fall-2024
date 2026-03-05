@@ -38,9 +38,24 @@ export async function resolve_member_conflict_merge(
     }
   }
 
-  return await perform.resolve_member_conflict_merge(
+  const result = await perform.resolve_member_conflict_merge(
     first_member_id,
     second_member_id,
     merged_member,
   );
+
+  return result;
+}
+
+// NEW: Un-resolve a conflict (reopen it)
+// Uses ONLY existing columns - no new fields needed!
+export async function unresolve_member_conflict(
+  first_member_id: number,
+  second_member_id: number,
+) {
+  await update.member_conflicts({
+    first_member_id: first_member_id,
+    second_member_id: second_member_id,
+    resolved: false, // Just flip this back to false!
+  });
 }

@@ -152,7 +152,7 @@ export default function MergeInputField({
             setCurrentValue(value);
             setFormValue(fieldName, value);
           }}
-          defaultValue={currentValue}
+          value={currentValue}
         />
       ) : isArray ? (
         <input
@@ -193,22 +193,22 @@ export default function MergeInputField({
             fieldType === "numeric" ||
             fieldType === "float4" ||
             fieldType === "float8") && (
-            <input
-              type="number"
-              className="w-full rounded border border-gray-300 p-2"
-              required={required}
-              value={currentValue}
-              placeholder={isAutoIncrement ? "automatically generated" : ""}
-              onChange={(e) => {
-                setCurrentValue(e.target.value);
-                setFormValue(fieldName, e.target.value);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && typeof onEnter === "function")
-                  onEnter();
-              }}
-            />
-          )}
+              <input
+                type="number"
+                className="w-full rounded border border-gray-300 p-2"
+                required={required}
+                value={currentValue}
+                placeholder={isAutoIncrement ? "automatically generated" : ""}
+                onChange={(e) => {
+                  setCurrentValue(e.target.value);
+                  setFormValue(fieldName, e.target.value);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && typeof onEnter === "function")
+                    onEnter();
+                }}
+              />
+            )}
 
           {fieldType === "bool" && (
             <input

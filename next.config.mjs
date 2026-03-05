@@ -14,10 +14,11 @@ const nextConfig = {
     return config;
   },
 
-  reactCompiler: true,
+  experimental: {
+    reactCompiler: true,
+  },
 
   turbopack: {
-    root: __dirname,
     rules: {
       "*.svg": {
         loaders: ["@svgr/webpack"],

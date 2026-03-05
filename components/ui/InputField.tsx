@@ -127,7 +127,7 @@ export default function InputField({
           onValueChange={(value) => {
             setCurrentValue(value);
           }}
-          defaultValue={currentValue}
+          value={currentValue}
         />
       ) : isArray ? (
         <input
@@ -144,7 +144,7 @@ export default function InputField({
               type="text"
               className="w-full rounded border border-gray-300 p-2"
               required={required}
-              defaultValue={normalizedValue}
+              value={currentValue ?? ""}
               onChange={(e) => setCurrentValue(e.target.value)}
             />
           )}
@@ -155,22 +155,22 @@ export default function InputField({
             fieldType === "numeric" ||
             fieldType === "float4" ||
             fieldType === "float8") && (
-            <input
-              type="number"
-              className="w-full rounded border border-gray-300 p-2"
-              required={required}
-              defaultValue={currentValue}
-              placeholder={isAutoIncrement ? "automatically generated" : ""}
-              onChange={(e) => setCurrentValue(e.target.value)}
-            />
-          )}
+              <input
+                type="number"
+                className="w-full rounded border border-gray-300 p-2"
+                required={required}
+                value={currentValue ?? ""}
+                placeholder={isAutoIncrement ? "automatically generated" : ""}
+                onChange={(e) => setCurrentValue(e.target.value)}
+              />
+            )}
 
           {fieldType === "bool" && (
             <input
               type="checkbox"
               className="rounded border border-gray-300 p-2"
               required={required}
-              defaultChecked={normalizedValue ?? true}
+              checked={!!currentValue}
               onChange={(e) => setCurrentValue(e.target.checked)}
             />
           )}
@@ -180,7 +180,7 @@ export default function InputField({
               type="text"
               className="w-full rounded border border-gray-300 p-2"
               required={required}
-              defaultValue={normalizedValue}
+              value={normalizedValue}
               readOnly
             />
           )}
@@ -190,10 +190,10 @@ export default function InputField({
               type="text"
               className="w-full rounded border border-gray-300 p-2"
               required={required}
-              defaultValue={
+              value={
                 typeof normalizedValue === "object"
                   ? JSON.stringify(normalizedValue)
-                  : normalizedValue
+                  : (normalizedValue ?? "")
               }
               readOnly
             />

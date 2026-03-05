@@ -21,6 +21,10 @@ import Stripe from "stripe";
 import { get } from "./supabase/api";
 
 export const convert = {
+  payoutDateAdjusted: (isoDate: string) => {
+    return new Date(isoDate).toISOString().slice(0, 7);
+  },
+
   product: (p: SquarespaceInventoryItem): SupabaseProductInsert => {
     let type: SupabaseProductType = "UNKNOWN";
     let year: string | null = null;
@@ -84,15 +88,32 @@ export const convert = {
         );
       }
 
+      const paymentPlatform = (t.payments.at(0)?.provider as SupabasePaymentPlatform) ?? "MAIL";
+      const amount = Number(t.total.value);
+      const totalNetPayment = Number(t.totalNetPayment.value);
+      const refundedAmount = Number(t.payments.at(0)?.refundedAmount.value ?? 0);
+
+      let fee: number;
+      if (refundedAmount > 0 || totalNetPayment <= 0) {
+        if (paymentPlatform === "STRIPE") {
+          fee = Math.round((amount * 0.029 + 0.30) * 100) / 100;
+        } else if (paymentPlatform === "PAYPAL") {
+          fee = Math.round(amount * 0.025 * 100) / 100;
+        } else {
+          fee = 0;
+        }
+      } else {
+        fee = amount - totalNetPayment;
+      }
+
       const order: SupabaseTransactionInsert = {
         sqsp_transaction_id: t.id,
         sqsp_order_id: t.salesOrderId,
         date: t.createdOn,
-        amount: Number(t.total.value),
-        fee: Number(t.total.value) - Number(t.totalNetPayment.value),
-        payment_platform:
-          (t.payments.at(0)?.provider as SupabasePaymentPlatform) ?? "MAIL",
-        refunded_amount: Number(t.payments.at(0)?.refundedAmount.value ?? 0),
+        amount,
+        fee,
+        payment_platform: paymentPlatform,
+        refunded_amount: refundedAmount,
         external_transaction_id: t.payments.at(0)?.id,
         transaction_email: t.customerEmail,
         fulfillment_status: "UNKNOWN",
@@ -168,15 +189,32 @@ export const convert = {
         );
       }
 
+      const paymentPlatform = (t.payments.at(0)?.provider as SupabasePaymentPlatform) ?? "MAIL";
+      const amount = Number(t.total.value);
+      const totalNetPayment = Number(t.totalNetPayment.value);
+      const refundedAmount = Number(t.payments.at(0)?.refundedAmount.value ?? 0);
+
+      let fee: number;
+      if (refundedAmount > 0 || totalNetPayment <= 0) {
+        if (paymentPlatform === "STRIPE") {
+          fee = Math.round((amount * 0.029 + 0.30) * 100) / 100;
+        } else if (paymentPlatform === "PAYPAL") {
+          fee = Math.round(amount * 0.025 * 100) / 100;
+        } else {
+          fee = 0;
+        }
+      } else {
+        fee = amount - totalNetPayment;
+      }
+
       const donation: SupabaseTransactionInsert = {
         sqsp_transaction_id: t.id,
         sqsp_order_id: null,
         date: t.createdOn,
-        amount: Number(t.total.value),
-        fee: Number(t.total.value) - Number(t.totalNetPayment.value),
-        refunded_amount: Number(t.payments.at(0)?.refundedAmount.value ?? 0),
-        payment_platform:
-          (t.payments.at(0)?.provider as SupabasePaymentPlatform) ?? "MAIL",
+        amount,
+        fee,
+        refunded_amount: refundedAmount,
+        payment_platform: paymentPlatform,
         external_transaction_id: t.payments.at(0)?.id,
         transaction_email: t.customerEmail,
         fulfillment_status: "FULFILLED",
@@ -264,6 +302,9 @@ export const convert = {
       return {
         amount: data.amount,
         date: new Date(data.created * 1000).toISOString(),
+        date_adjusted: convert.payoutDateAdjusted(
+          new Date(data.created * 1000).toISOString(),
+        ),
         payment_platform: "STRIPE",
         payout_id: data.id,
         status: data.status,
@@ -272,8 +313,11 @@ export const convert = {
 
     paypal: (data: PaypalTransactionInfo): SupabasePayoutInsert => {
       return {
-        amount: Math.abs(Number(data.transaction_amount.value)) * 100,
+        amount: Math.round(Math.abs(Number(data.transaction_amount.value)) * 100),
         date: new Date(data.transaction_initiation_date).toISOString(),
+        date_adjusted: convert.payoutDateAdjusted(
+          new Date(data.transaction_initiation_date).toISOString(),
+        ),
         payment_platform: "PAYPAL",
         payout_id: data.transaction_id,
         status:
