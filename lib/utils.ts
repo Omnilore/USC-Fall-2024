@@ -79,7 +79,7 @@ function monthNameFromMm(mm: string): string {
  * - YYYY — year only
  * - YYYY-MM — year + month
  * - YYYY-MM-DD — full date
- * - --MM-DD — month + day only (unknown year; leading -- in storage)
+ * - MM-DD or --MM-DD — month + day only (unknown year)
  *
  * Missing parts are shown as "-" when any part is unknown; full dates use a normal long form.
  */
@@ -87,9 +87,13 @@ export function formatPartialDate(value: string | null | undefined): string {
   if (value == null || value.trim() === "") return "";
   const v = value.trim();
 
-  // Month + day only: --07-15
+  // Month + day only: --07-15 or 07-15
   if (/^--\d{2}-\d{2}$/.test(v)) {
     const [, , mm, dd] = v.split("-");
+    return `- / ${monthNameFromMm(mm)} / ${String(Number(dd))}`;
+  }
+  if (/^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(v)) {
+    const [mm, dd] = v.split("-");
     return `- / ${monthNameFromMm(mm)} / ${String(Number(dd))}`;
   }
 

@@ -28,10 +28,11 @@ ALTER TABLE public.members
     OR date_of_birth ~ '^\d{4}-\d{2}$'
     OR date_of_birth ~ '^\d{4}-\d{2}-\d{2}$'
     OR date_of_birth ~ '^--(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$'
+    OR date_of_birth ~ '^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$'
   );
 
--- Allowed values (use exactly these strings in Table Editor):
+-- Allowed values (Table Editor):
 --   1953              year only
 --   1953-07           year + month
 --   1953-07-01        full date
---   --07-15           month + day only (leading -- means unknown year)
+--   08-09 or --08-09  month + day only (unknown year)
