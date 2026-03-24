@@ -68,24 +68,34 @@ export function formatDateShort(isoDate: string): string {
   }
 }
 
+function monthNameFromMm(mm: string): string {
+  const m = Number(mm);
+  if (m < 1 || m > 12) return "-";
+  return new Date(2000, m - 1, 1).toLocaleString("en-US", { month: "long" });
+}
+
 /**
- * Format a partial date string (year only, year-month, or full YYYY-MM-DD).
- * Used for fields like date_of_birth that may store "1953", "1953-07", or "1953-07-01".
+ * Format a partial date stored as text:
+ * - YYYY — year only
+ * - YYYY-MM — year + month
+ * - YYYY-MM-DD — full date
+ * - --MM-DD — month + day only (unknown year; leading -- in storage)
+ *
+ * Missing parts are shown as "-" when any part is unknown; full dates use a normal long form.
  */
 export function formatPartialDate(value: string | null | undefined): string {
   if (value == null || value.trim() === "") return "";
   const v = value.trim();
-  // Year only (e.g. 1953)
-  if (/^\d{4}$/.test(v)) return v;
-  // Year-month (e.g. 1953-07) -> "July 1953"
-  if (/^\d{4}-\d{2}$/.test(v)) {
-    const [y, m] = v.split("-");
-    const month = new Date(Number(y), Number(m) - 1, 1).toLocaleString("en-US", { month: "long" });
-    return `${month} ${y}`;
+
+  // Month + day only: --07-15
+  if (/^--\d{2}-\d{2}$/.test(v)) {
+    const [, , mm, dd] = v.split("-");
+    return `- / ${monthNameFromMm(mm)} / ${String(Number(dd))}`;
   }
-  // Full date (e.g. 1953-07-01)
+
+  // Full date — all parts known
   if (/^\d{4}-\d{2}-\d{2}$/.test(v)) {
-    const date = new Date(v);
+    const date = new Date(v + "T12:00:00");
     if (!isNaN(date.getTime())) {
       return date.toLocaleDateString("en-US", {
         year: "numeric",
@@ -95,5 +105,17 @@ export function formatPartialDate(value: string | null | undefined): string {
       });
     }
   }
+
+  // Year only
+  if (/^\d{4}$/.test(v)) {
+    return `${v} / - / -`;
+  }
+
+  // Year + month
+  if (/^\d{4}-\d{2}$/.test(v)) {
+    const [y, mm] = v.split("-");
+    return `${y} / ${monthNameFromMm(mm)} / -`;
+  }
+
   return v;
 }
