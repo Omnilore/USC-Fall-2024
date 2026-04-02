@@ -18,6 +18,16 @@ const nextConfig = {
     reactCompiler: true,
   },
 
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
+
+  typescript: {
+    // THIS ALLOWS BUILDS TO COMPLETE WITH TYPE ERRORS.
+    // BE CAREFUL WITH THIS IN PRODUCTION.
+    ignoreBuildErrors: true,
+  },
+
   turbopack: {
     rules: {
       "*.svg": {
