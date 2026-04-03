@@ -342,6 +342,41 @@ export default function ActionPanel({
                   }
 
 
+                  // SDGs trimester dropdown (semester + year)
+                  if (selectedTable === "sdgs" && name === "trimester") {
+                    const currentYear = new Date().getFullYear();
+                    const semesters = ["Fall", "Spring", "Summer"];
+                    const years = Array.from({ length: 41 }, (_, i) => currentYear - 20 + i);
+                    const options = years.flatMap((yr) =>
+                      semesters.map((sem) => `${sem} ${yr}`)
+                    );
+
+                    return (
+                      <div key={name} className="flex flex-col gap-3">
+                        <label className="font-medium capitalize">
+                          {name.replace(/_/g, " ")}
+                        </label>
+                        <select
+                          value={userFormData[name] ?? formData[name] ?? ""}
+                          onChange={(e) =>
+                            setUserFormData({
+                              ...userFormData,
+                              [name]: e.target.value || null,
+                            })
+                          }
+                          className="w-full rounded-lg border border-gray-200 p-2"
+                        >
+                          <option value="">Select Semester</option>
+                          {options.map((opt) => (
+                            <option key={opt} value={opt}>
+                              {opt}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    );
+                  }
+
                   // Regular fields
                   return (
                     <InputField
