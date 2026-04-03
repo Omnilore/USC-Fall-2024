@@ -9,7 +9,7 @@ import * as XLSX from "xlsx";
 import ExcelJS from "exceljs";
 import { saveAs } from "file-saver";
 import { usePartnerNavigation } from "@/hooks/use-partner-navigation";
-import { cn } from "@/lib/utils";
+import { cn, effectiveMemberLineProductType } from "@/lib/utils";
 
 export default function ForumReports() {
   const [customRange, setCustomRange] = useState(false);
@@ -155,15 +155,21 @@ export default function ForumReports() {
       .map((p) => p.sku)
       .filter((sku) => sku !== "SQ-TEST");
 
-    const { data: mtt, error: mttError } = await supabase
+    const { data: mttRaw, error: mttError } = await supabase
       .from("members_to_transactions")
-      .select("member_id, transaction_id, sku, amount")
+      .select("member_id, transaction_id, sku, amount, product_type_override")
       .in("sku", forumSkus);
 
     if (mttError) {
       console.error("Error fetching members_to_transactions", mttError);
       return;
     }
+
+    const mtt = (mttRaw ?? []).filter(
+      (row) =>
+        effectiveMemberLineProductType("FORUM", row.product_type_override) ===
+        "FORUM",
+    );
 
     let filteredMemberIds: (string | number)[] = [];
 

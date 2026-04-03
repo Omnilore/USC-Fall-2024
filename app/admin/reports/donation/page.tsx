@@ -9,7 +9,7 @@ import * as XLSX from "xlsx";
 import ExcelJS from "exceljs";
 import { saveAs } from "file-saver";
 import { usePartnerNavigation } from "@/hooks/use-partner-navigation";
-import { cn } from "@/lib/utils";
+import { cn, effectiveMemberLineProductType } from "@/lib/utils";
 
 export default function DonationReports() {
   const [customRange, setCustomRange] = useState(false);
@@ -211,37 +211,41 @@ export default function DonationReports() {
       return;
     }
 
-    console.log('fetchDonationTransactions - selectedYears:', selectedYears);
+    console.log("fetchDonationTransactions - selectedYears:", selectedYears);
 
     const { data: products, error: productError } = await supabase
       .from("products")
-      .select("sku")
-      .eq("type", "DONATION");
+      .select("sku, type");
 
     if (productError) {
-      console.error("Error fetching donation SKUs", productError);
+      console.error("Error fetching products for donation report", productError);
       return;
     }
 
-    console.log('Donation products:', products);
+    const skuTypeMap = Object.fromEntries(
+      (products ?? [])
+        .filter((p) => p.sku !== "SQ-TEST")
+        .map((p) => [p.sku, p.type as string]),
+    );
 
-    const donationSkus = products
-      .map((p) => p.sku)
-      .filter((sku) => sku !== "SQ-TEST");
-
-    console.log('Donation SKUs (excluding SQ-TEST):', donationSkus);
-
-    if (donationSkus.length === 0) {
+    const allSkus = Object.keys(skuTypeMap);
+    if (allSkus.length === 0) {
       setDonationTransactions([]);
       return;
     }
 
-    const { data: mtt, error: mttError } = await supabase
+    const { data: mttRaw, error: mttError } = await supabase
       .from("members_to_transactions")
-      .select("transaction_id, member_id")
-      .in("sku", donationSkus);
+      .select("transaction_id, member_id, sku, product_type_override")
+      .in("sku", allSkus);
 
-    console.log('members_to_transactions with donation SKUs:', mtt?.length || 0);
+    const mtt = (mttRaw ?? []).filter((row) => {
+      const catalog = skuTypeMap[row.sku];
+      return (
+        effectiveMemberLineProductType(catalog, row.product_type_override) ===
+        "DONATION"
+      );
+    });
 
     if (mttError) {
       console.error("Error fetching members_to_transactions", mttError);

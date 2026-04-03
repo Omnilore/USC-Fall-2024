@@ -13,7 +13,23 @@ import { MoonLoader } from "react-spinners";
 import { useLocalStorage } from "@uidotdev/usehooks";
 import { ClientOnly } from "@/components/is-client";
 import { supabase } from "@/app/supabase";
-import { formatDate } from "@/lib/utils";
+import { effectiveMemberLineProductType, formatDate } from "@/lib/utils";
+
+const RECHARACTERIZE_SELECT_VALUES = [
+  "MEMBERSHIP",
+  "FORUM",
+  "DONATION",
+  "UNKNOWN",
+  "HIDDEN",
+  "REFUND",
+] as const;
+
+function recharacterizeSelectValue(productType: string): string {
+  const u = String(productType).trim().toUpperCase();
+  return (RECHARACTERIZE_SELECT_VALUES as readonly string[]).includes(u)
+    ? u
+    : "MEMBERSHIP";
+}
 
 export default function () {
   return (
@@ -154,16 +170,14 @@ function Table() {
     });
   }, [filteredEntries, selectedSort, selectedSortWay]);
 
-// Fetch member transactions
+// One row per members_to_transactions line (supports distinct overrides per payment)
 const fetchMemberTransactions = async (memberId: number) => {
   try {
-    const { data: memberTransactions, error: mttError } = await supabase
+    const { data: mttRows, error: mttError } = await supabase
       .from("members_to_transactions")
-      .select(`
-        transaction_id,
-        amount,
-        sku
-      `)
+      .select(
+        "transaction_id, line_item_index, amount, sku, product_type_override",
+      )
       .eq("member_id", memberId);
 
     if (mttError) {
@@ -171,15 +185,16 @@ const fetchMemberTransactions = async (memberId: number) => {
       return [];
     }
 
-    if (!memberTransactions || memberTransactions.length === 0) {
+    if (!mttRows || mttRows.length === 0) {
       return [];
     }
 
-    const transactionIds = memberTransactions.map(mt => mt.transaction_id);
+    const transactionIds = [...new Set(mttRows.map((mt) => mt.transaction_id))];
 
     const { data: transactions, error: txError } = await supabase
       .from("transactions")
-      .select(`
+      .select(
+        `
         id,
         date,
         payment_platform,
@@ -188,7 +203,8 @@ const fetchMemberTransactions = async (memberId: number) => {
         amount,
         created_at,
         sqsp_id
-      `)
+      `,
+      )
       .in("id", transactionIds)
       .order("date", { ascending: false });
 
@@ -197,7 +213,7 @@ const fetchMemberTransactions = async (memberId: number) => {
       return [];
     }
 
-    const skus = [...new Set(memberTransactions.map((mt) => mt.sku))];
+    const skus = [...new Set(mttRows.map((mt) => mt.sku))];
 
     const { data: products = [], error: productError } = await supabase
       .from("products")
@@ -209,63 +225,73 @@ const fetchMemberTransactions = async (memberId: number) => {
     }
 
     const productMap = Object.fromEntries(
-      (products ?? []).map((p) => [p.sku, p])
+      (products ?? []).map((p) => [p.sku, p]),
     );
 
-    const mttMap = Object.fromEntries(
-      memberTransactions.map(mt => [mt.transaction_id, mt])
+    const transactionMap = Object.fromEntries(
+      (transactions ?? []).map((t) => [t.id, t]),
     );
 
-    const processedTransactions = transactions.map(transaction => {
-      const mt = mttMap[transaction.id];
-      if (!mt) return null;
+    const processedTransactions = mttRows
+      .map((mt) => {
+        const transaction = transactionMap[mt.transaction_id];
+        if (!transaction) return null;
 
-      const product = productMap[mt.sku];
-      
-      let display_status = "Completed";
+        const product = productMap[mt.sku];
+        const catalogType = String(product?.type ?? "UNKNOWN").trim().toUpperCase();
+        const effectiveType = effectiveMemberLineProductType(
+          catalogType,
+          mt.product_type_override,
+        );
 
-      if (transaction.refunded_amount > 0) {
-        if (transaction.refunded_amount === transaction.amount) {
-          display_status = "Fully Refunded";
+        let display_status = "Completed";
+
+        if (transaction.refunded_amount > 0) {
+          if (transaction.refunded_amount === transaction.amount) {
+            display_status = "Fully Refunded";
+          } else {
+            display_status = "Partially Refunded";
+          }
+        } else if (transaction.fulfillment_status === "CANCELED") {
+          display_status = "Canceled";
+        } else if (transaction.fulfillment_status === "PENDING") {
+          display_status = "Pending";
+        } else if (transaction.fulfillment_status === "FULFILLED") {
+          display_status = "Completed";
         } else {
-          display_status = "Partially Refunded";
+          display_status = transaction.fulfillment_status || "Unknown";
         }
-      } else if (transaction.fulfillment_status === "CANCELED") {
-        display_status = "Canceled";
-      } else if (transaction.fulfillment_status === "PENDING") {
-        display_status = "Pending";
-      } else if (transaction.fulfillment_status === "FULFILLED") {
-        display_status = "Completed";
-      } else {
-        display_status = transaction.fulfillment_status || "Unknown";
-      }
 
-      return {
-        transaction_id: transaction.id,
-        amount: mt.amount,
-        sku: mt.sku,
-        date: transaction.date,
-        payment_platform: transaction.payment_platform,
-        fulfillment_status: transaction.fulfillment_status,
-        refunded_amount: transaction.refunded_amount,
-        total_amount: transaction.amount,
-        created_at: transaction.created_at,
-        sqsp_id: transaction.sqsp_id,
-        product_descriptor: product?.descriptor || "Unknown",
-        product_type: product?.type || "Unknown",
-        display_status,
-      };
-    })
-    .filter((t): t is NonNullable<typeof t> => t !== null);
+        const isRefund =
+          (transaction.refunded_amount ?? 0) > 0 ||
+          transaction.fulfillment_status === "CANCELED";
 
-    // Sort: refunds/recharacterized at top, then newest first
+        return {
+          transaction_id: transaction.id,
+          line_item_index: Number(mt.line_item_index ?? 0),
+          amount: mt.amount,
+          sku: mt.sku,
+          date: transaction.date,
+          payment_platform: transaction.payment_platform,
+          fulfillment_status: transaction.fulfillment_status,
+          refunded_amount: transaction.refunded_amount,
+          total_amount: transaction.amount,
+          created_at: transaction.created_at,
+          sqsp_id: transaction.sqsp_id,
+          product_descriptor: product?.descriptor || "Unknown",
+          catalog_product_type: catalogType,
+          product_type_override: mt.product_type_override,
+          product_type: isRefund ? "REFUND" : effectiveType,
+          display_status,
+        };
+      })
+      .filter((t): t is NonNullable<typeof t> => t !== null);
+
     const sortedTransactions = processedTransactions.sort((a, b) => {
       const aIsRefund =
-        (a.product_type as string) === "REFUND" ||
-        (a.refunded_amount ?? 0) > 0;
+        a.product_type === "REFUND" || (a.refunded_amount ?? 0) > 0;
       const bIsRefund =
-        (b.product_type as string) === "REFUND" ||
-        (b.refunded_amount ?? 0) > 0;
+        b.product_type === "REFUND" || (b.refunded_amount ?? 0) > 0;
 
       if (aIsRefund !== bIsRefund) {
         return aIsRefund ? -1 : 1;
@@ -281,95 +307,76 @@ const fetchMemberTransactions = async (memberId: number) => {
   }
 };
 
-
   const handleRecharacterize = async (
     transactionId: number,
-    newType: "MEMBERSHIP" | "FORUM" | "DONATION" | "REFUND"
+    lineItemIndex: number,
+    newType:
+      | "MEMBERSHIP"
+      | "FORUM"
+      | "DONATION"
+      | "REFUND"
+      | "UNKNOWN"
+      | "HIDDEN",
   ) => {
+    if (!selectedRow?.id) return;
+
+    const memberId = Number(selectedRow.id);
+    const li = Number(lineItemIndex ?? 0);
+
     try {
       const t = memberTransactions.find(
-        (t) => t.transaction_id === transactionId
+        (row) =>
+          row.transaction_id === transactionId &&
+          Number(row.line_item_index ?? 0) === li,
       );
-  
+
       if (!t) {
-        console.error("No transaction found for recharacterization");
+        alert(
+          "Could not find that transaction line. Close and reopen View transactions.",
+        );
         return;
       }
-  
-      const { sku, amount } = t;
-  
-      // 1. Update PRODUCT TYPE
-      const { error: productError } = await supabase
-        .from("products")
-        .update({
-          type: newType as any
-            | "MEMBERSHIP"
-            | "FORUM"
-            | "DONATION"
-            | "REFUND"
-            | "UNKNOWN"
-            | "HIDDEN",
-        })
-        .eq("sku", sku);
-  
-      if (productError) {
-        console.error("Failed to update product type", productError);
+
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        alert("You must be signed in to recharacterize.");
         return;
       }
-  
-      if (newType === "REFUND") {
-        const { error: transError } = await supabase
-          .from("transactions")
-          .update({
-            refunded_amount: amount,      // full amount refunded
-            fulfillment_status: "CANCELED",   // valid enum value
-          })
-          .eq("id", transactionId);
-      
-        if (transError) {
-          console.error("Failed to update transaction refund fields", transError);
-          return;
-        }
+
+      const res = await fetch("/api/admin/recharacterize-member-transaction", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          memberId,
+          transactionId,
+          lineItemIndex: li,
+          newType,
+          lineAmount: t.amount,
+          catalogProductType: t.catalog_product_type,
+          sku: t.sku,
+        }),
+      });
+
+      const json = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        alert(
+          json.error ??
+            `Save failed (${res.status}). Ensure SUPABASE_SERVICE_ROLE_KEY is set on the server for admin updates.`,
+        );
+        return;
       }
-      
-  
-// 3. Update UI immediately
-setMemberTransactions(prev =>
-  prev.map(tr => {
-    if (tr.transaction_id !== transactionId) return tr;
 
-    // Copy the original fields
-    let updatedRefundedAmount = tr.refunded_amount;
-    let updatedFulfillmentStatus = tr.fulfillment_status;
-    let updatedDisplayStatus = tr.display_status;
-
-    // Case 1: REFUND (recharacterized as refund)
-    if (newType === "REFUND") {
-      updatedRefundedAmount = amount;         // Set refunded amount
-      updatedFulfillmentStatus = "CANCELED";  // Valid enum value
-      updatedDisplayStatus = "Fully Refunded";
-    } 
-    // Case 2: NOT refund → reset refund info
-    else {
-      updatedRefundedAmount = 0;              // Reset refunded amount
-      updatedFulfillmentStatus = "FULFILLED"; // Or the original status if you want
-      updatedDisplayStatus = "Completed";     // Reset display label
-    }
-
-    return {
-      ...tr,
-      product_type: newType,
-      refunded_amount: updatedRefundedAmount,
-      fulfillment_status: updatedFulfillmentStatus,
-      display_status: updatedDisplayStatus,
-    };
-  })
-);
-
-      
-  
+      setMemberTransactions(await fetchMemberTransactions(memberId));
     } catch (err) {
       console.error("Unexpected error updating transaction type:", err);
+      alert(
+        err instanceof Error ? err.message : "Unexpected error while saving.",
+      );
     }
   };
   
@@ -380,7 +387,7 @@ setMemberTransactions(prev =>
       return;
     }
     
-    const transactions = await fetchMemberTransactions(selectedRow.id);
+    const transactions = await fetchMemberTransactions(Number(selectedRow.id));
     setMemberTransactions(transactions);
     setShowTransactions(true);
   };
@@ -537,8 +544,11 @@ setMemberTransactions(prev =>
               {memberTransactions.length === 0 ? (
                 <p className="text-gray-500">No transactions found.</p>
               ) : (
-                memberTransactions.map((transaction, index) => (
-                  <div key={index} className="border rounded-lg p-4">
+                memberTransactions.map((transaction) => (
+                  <div
+                    key={`${transaction.transaction_id}-${transaction.line_item_index}`}
+                    className="border rounded-lg p-4"
+                  >
                     <div className="grid grid-cols-2 gap-4">
                       <div>
                         <strong>Date:</strong> {isClient ? formatDate(transaction.date, true) : transaction.date}
@@ -547,11 +557,20 @@ setMemberTransactions(prev =>
                         <strong>Type:</strong> {transaction.product_type}
                         {
                         <select
-                          value={transaction.product_type}
+                          value={recharacterizeSelectValue(
+                            transaction.product_type,
+                          )}
                           onChange={(e) =>
                             handleRecharacterize(
                               transaction.transaction_id,
-                              e.target.value as "MEMBERSHIP" | "FORUM" | "DONATION" | "REFUND"
+                              transaction.line_item_index,
+                              e.target.value as
+                                | "MEMBERSHIP"
+                                | "FORUM"
+                                | "DONATION"
+                                | "REFUND"
+                                | "UNKNOWN"
+                                | "HIDDEN",
                             )
                           }
                           className="border rounded px-2 py-1 text-sm"
@@ -559,6 +578,8 @@ setMemberTransactions(prev =>
                           <option value="MEMBERSHIP">Membership</option>
                           <option value="FORUM">Forum</option>
                           <option value="DONATION">Donation</option>
+                          <option value="UNKNOWN">Unknown</option>
+                          <option value="HIDDEN">Hidden</option>
                           <option value="REFUND">Refund</option>
                         </select>
                         }

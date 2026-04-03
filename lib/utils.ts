@@ -123,3 +123,14 @@ export function formatPartialDate(value: string | null | undefined): string {
 
   return v;
 }
+
+/** `products.type` for a catalog line, optionally overridden on `members_to_transactions`. */
+export function effectiveMemberLineProductType(
+  catalogType: string | null | undefined,
+  override: string | null | undefined,
+): string {
+  const o = override?.trim();
+  if (o) return o.toUpperCase();
+  const c = catalogType?.trim();
+  return c ? c.toUpperCase() : "UNKNOWN";
+}

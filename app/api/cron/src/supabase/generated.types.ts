@@ -1344,6 +1344,7 @@ export type Database = {
           amount: number
           line_item_index: number
           member_id: number
+          product_type_override: string | null
           sku: string
           transaction_id: number
         }
@@ -1351,6 +1352,7 @@ export type Database = {
           amount: number
           line_item_index: number
           member_id: number
+          product_type_override?: string | null
           sku: string
           transaction_id: number
         }
@@ -1358,6 +1360,7 @@ export type Database = {
           amount?: number
           line_item_index?: number
           member_id?: number
+          product_type_override?: string | null
           sku?: string
           transaction_id?: number
         }

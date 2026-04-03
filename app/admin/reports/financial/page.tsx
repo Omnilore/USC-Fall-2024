@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import * as XLSX from "xlsx";
 import ExcelJS from "exceljs";
 import { saveAs } from "file-saver";
+import { effectiveMemberLineProductType } from "@/lib/utils";
 
 const TreasurerReqs = () => {
   const [fromDate, setFromDate] = useState("");
@@ -758,15 +759,35 @@ const TreasurerReqs = () => {
       summary[categoryKey].total = categoryTotal;
 
       const { data: countData, error: countError } = await supabase
-        .from('transactions')
-        .select('id, members_to_transactions!inner(sku, products!inner(type))', { count: 'exact', head: false })
-        .gte('date', fromDateValue)
-        .lte('date', toDateValue)
-        .eq('members_to_transactions.products.type', category.toUpperCase() as 'MEMBERSHIP' | 'FORUM' | 'DONATION');
+        .from("transactions")
+        .select(
+          "id, members_to_transactions!inner(sku, product_type_override, products!inner(type))",
+        )
+        .gte("date", fromDateValue)
+        .lte("date", toDateValue);
 
       if (!countError && countData) {
-        const uniqueTransactionIds = new Set(countData.map(t => t.id));
-        summary[categoryKey].count = uniqueTransactionIds.size;
+        const want = category.toUpperCase() as
+          | "MEMBERSHIP"
+          | "FORUM"
+          | "DONATION";
+        const matching = countData.filter((t) => {
+          const lines = t.members_to_transactions as
+            | {
+                sku: string;
+                product_type_override: string | null;
+                products: { type: string };
+              }[]
+            | null;
+          return (lines ?? []).some((line) => {
+            const eff = effectiveMemberLineProductType(
+              line.products?.type,
+              line.product_type_override,
+            );
+            return eff === want;
+          });
+        });
+        summary[categoryKey].count = new Set(matching.map((t) => t.id)).size;
       }
     }
 
