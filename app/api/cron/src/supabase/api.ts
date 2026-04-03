@@ -162,14 +162,21 @@ export const upsert = {
   },
 
   payouts: async (payoutsToUpsert: SupabasePayoutInsert[]) => {
-    const { error } = await supabase.rpc("upsert_payouts", {
-      _payouts: payoutsToUpsert,
-    });
+    if (payoutsToUpsert.length === 0) return;
 
-    if (error)
-      throw new Error(
-        `Failed to upsert payouts. ${error.hint}. ${error.message}`,
-      );
+    // Avoid PostgREST ambiguity when both upsert_payouts(json) and upsert_payouts(jsonb) exist.
+    const batchSize = 200;
+    for (let i = 0; i < payoutsToUpsert.length; i += batchSize) {
+      const batch = payoutsToUpsert.slice(i, i + batchSize);
+      const { error } = await supabase.from("payouts").upsert(batch, {
+        onConflict: "payment_platform,payout_id",
+      });
+
+      if (error)
+        throw new Error(
+          `Failed to upsert payouts. ${error.hint ?? ""} ${error.message}`,
+        );
+    }
   },
 };
 

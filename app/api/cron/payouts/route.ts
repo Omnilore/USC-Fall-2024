@@ -10,14 +10,14 @@ import type {
 
 export async function POST() {
   return apiResponse(async () => {
-    const stripe_payouts = api.stripe.payouts();
-    const paypal_payouts = api.paypal.payouts();
+    const stripeRows = await api.stripe.payouts();
+    const paypalRows = await api.paypal.payouts();
 
-    await upsert.payouts((await stripe_payouts).map(convert.payouts.stripe));
-    await upsert.payouts((await paypal_payouts).map(convert.payouts.paypal));
+    await upsert.payouts(stripeRows.map(convert.payouts.stripe));
+    await upsert.payouts(paypalRows.map(convert.payouts.paypal));
 
     return Response.json({
-      message: `Upserted ${(await stripe_payouts).length} stripe payouts and ${(await paypal_payouts).length} paypal payouts`,
+      message: `Upserted ${stripeRows.length} stripe payouts and ${paypalRows.length} paypal payouts`,
     });
   });
 }
@@ -78,10 +78,18 @@ const api = {
 
         const data = (await res.json()) as PaypalTransactionSearchResponse;
 
-        console.log(JSON.stringify(data, null, 2));
+        if (!res.ok) {
+          const msg =
+            typeof data === "object" && data !== null && "message" in data
+              ? String((data as { message?: string }).message)
+              : res.statusText;
+          throw new Error(`PayPal reporting API error (${res.status}): ${msg}`);
+        }
+
+        const details = data.transaction_details ?? [];
 
         paypal_payouts.push(
-          ...data.transaction_details
+          ...details
             .filter((t) =>
               t.transaction_info.transaction_event_code.startsWith("T04"),
             )
