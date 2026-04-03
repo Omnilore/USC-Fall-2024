@@ -8,6 +8,7 @@ import SelectDropdown from "@/components/ui/SelectDropdown";
 import SearchInput from "@/components/ui/SearchInput";
 import { queryTableWithPrimaryKey, TableName } from "@/app/queryFunctions";
 import ActionPanel from "@/components/ui/ActionPanel";
+import AssignPanel from "@/components/ui/AssignPanel";
 import DeletePanel from "@/components/ui/DeletePanel";
 import { MoonLoader } from "react-spinners";
 import { useLocalStorage } from "@uidotdev/usehooks";
@@ -39,6 +40,8 @@ export default function () {
   );
 }
 
+const ASSIGN_TABLES = new Set(["committee_members", "sdg_members", "leadership"]);
+
 function Table() {
   const [query, setQuery] = useState("");
   const [roles, setRoles] = useState<string[]>([]);
@@ -68,6 +71,7 @@ function Table() {
   const [sortOptions, setSortOptions] = useState<string[]>(["default"]);
   const [primaryKeys, setPrimaryKeys] = useState<string[]>([]);
   const [isEntryPanelOpen, setIsEntryPanelOpen] = useState(false);
+  const [isAssignPanelOpen, setIsAssignPanelOpen] = useState(false);
   const [isDeletePanelOpen, setIsDeletePanelOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   
@@ -434,13 +438,112 @@ const fetchMemberTransactions = async (memberId: number) => {
     setup().catch(console.error);
   }, []);
 
+  const enrichWithNames = async (
+    table: string,
+    data: Record<string, any>[],
+  ): Promise<Record<string, any>[]> => {
+    if (!data.length) return data;
+
+    const tableName = String(table);
+
+    if (
+      tableName === "committee_members" ||
+      tableName === "sdg_members" ||
+      tableName === "leadership"
+    ) {
+      const memberIds = [
+        ...new Set(data.map((r) => r.member_id).filter(Boolean)),
+      ];
+      const { data: members } = memberIds.length
+        ? await supabase
+            .from("members")
+            .select("id, first_name, last_name")
+            .in("id", memberIds)
+        : { data: [] };
+      const memberMap = new Map(
+        (members ?? []).map((m: any) => [
+          m.id,
+          `${m.first_name ?? ""} ${m.last_name ?? ""}`.trim(),
+        ]),
+      );
+
+      if (tableName === "committee_members") {
+        const committeeIds = [
+          ...new Set(data.map((r) => r.committee_id).filter(Boolean)),
+        ];
+        const { data: committees } = committeeIds.length
+          ? await supabase
+              .from("committees")
+              .select("id, committee_name")
+              .in("id", committeeIds)
+          : { data: [] };
+        const committeeMap = new Map(
+          (committees ?? []).map((c: any) => [c.id, c.committee_name ?? ""]),
+        );
+
+        return data.map((row) => ({
+          ...row,
+          member_name: memberMap.get(row.member_id) ?? "",
+          committee_name: committeeMap.get(row.committee_id) ?? "",
+        }));
+      }
+
+      if (tableName === "sdg_members") {
+        const sdgIds = [
+          ...new Set(data.map((r) => r.sdg_id).filter(Boolean)),
+        ];
+        const { data: sdgs } = sdgIds.length
+          ? await supabase.from("sdgs").select("id, sdg").in("id", sdgIds)
+          : { data: [] };
+        const sdgMap = new Map(
+          (sdgs ?? []).map((s: any) => [s.id, s.sdg ?? ""]),
+        );
+
+        return data.map((row) => ({
+          ...row,
+          member_name: memberMap.get(row.member_id) ?? "",
+          sdg_name: sdgMap.get(row.sdg_id) ?? "",
+        }));
+      }
+
+      if (tableName === "leadership") {
+        const posIds = [
+          ...new Set(
+            data.map((r) => r.leadership_position_id).filter(Boolean),
+          ),
+        ];
+        const { data: positions } = posIds.length
+          ? await supabase
+              .from("leadership_positions")
+              .select("id, leadership_position")
+              .in("id", posIds)
+          : { data: [] };
+        const posMap = new Map(
+          (positions ?? []).map((p: any) => [
+            p.id,
+            p.leadership_position ?? "",
+          ]),
+        );
+
+        return data.map((row) => ({
+          ...row,
+          member_name: memberMap.get(row.member_id) ?? "",
+          role_name: posMap.get(row.leadership_position_id) ?? "",
+        }));
+      }
+    }
+
+    return data;
+  };
+
   const fetchEntries = async () => {
     if (!selectedTable) return;
     try {
-      const { data, primaryKeys } =
+      const { data: rawData, primaryKeys } =
         await queryTableWithPrimaryKey(selectedTable,
           selectedTable === "audit_logs" ? { includeServiceLogs, limit: 1000 }: undefined,
         );
+      const data = await enrichWithNames(String(selectedTable), rawData);
       setEntries(data);
       
       setPrimaryKeys(primaryKeys ?? []);
@@ -452,17 +555,19 @@ const fetchMemberTransactions = async (memberId: number) => {
       for (const key of [
         "first_name",
         "last_name",
+        "member_name",
+        "committee_name",
+        "sdg_name",
+        "role_name",
         "sqsp_id",
         "descriptor",
         "sku",
         "date",
         "amount",
         "year",
-        "role_name",
         "table_name",
         "first_member_id",
         "member_id",
-        "committee_name",
         "id",
         "updated_at",
         "created_at",
@@ -508,6 +613,15 @@ const fetchMemberTransactions = async (memberId: number) => {
   const openEntryPanel = (mode: "add" | "edit") => {
     if (mode === "edit" && selectedRow === null) {
       alert("Select a row");
+      return;
+    }
+
+    if (mode === "add" && ASSIGN_TABLES.has(String(selectedTable))) {
+      if (!hasPermission("can_create")) {
+        alert("NO ADD PERMISSION");
+        return;
+      }
+      setIsAssignPanelOpen(true);
       return;
     }
 
@@ -767,6 +881,21 @@ const fetchMemberTransactions = async (memberId: number) => {
                   reloadData={fetchEntries}
                 />
               )}
+              {/* Assign Panel (committee_members, sdg_members, leadership) */}
+              {selectedTable &&
+                ASSIGN_TABLES.has(String(selectedTable)) && (
+                  <AssignPanel
+                    isOpen={isAssignPanelOpen}
+                    onClose={() => setIsAssignPanelOpen(false)}
+                    table={
+                      String(selectedTable) as
+                        | "committee_members"
+                        | "sdg_members"
+                        | "leadership"
+                    }
+                    reloadData={fetchEntries}
+                  />
+                )}
               {/* Delete Panel */}
               {selectedTable && (
                 <DeletePanel
