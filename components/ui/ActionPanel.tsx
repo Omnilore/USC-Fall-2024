@@ -5,6 +5,7 @@ import { SupabaseProduct } from "@/app/api/cron/src/supabase/types";
 import { getProducts, TableName } from "@/app/queryFunctions";
 import { toast } from "sonner";
 import UserIcon from "@/components/assets/user-icon.png";
+import { resolveEmbeddablePhotoUrl } from "@/lib/resolve-photo-url";
 
 interface ActionPanelProps {
   isOpen: boolean;
@@ -71,7 +72,21 @@ export default function ActionPanel({
 
       // Reset form state fresh each open
       if (mode === "edit" && selectedRow) {
-        setFormData(selectedRow);
+        if (selectedTable === "members") {
+          const { photo_path, ...rest } = selectedRow;
+          const path =
+            typeof photo_path === "string" ? photo_path.trim() : photo_path;
+          const link =
+            typeof selectedRow.photo_link === "string"
+              ? selectedRow.photo_link.trim()
+              : selectedRow.photo_link;
+          setFormData({
+            ...rest,
+            photo_link: link || path || null,
+          });
+        } else {
+          setFormData(selectedRow);
+        }
         setUserFormData({});
       } else {
         setFormData({});
@@ -208,6 +223,7 @@ export default function ActionPanel({
                 (field) =>
                   field.name !== "created_at" &&
                   field.name !== "updated_at" &&
+                  field.name !== "photo_path" &&
                   !(
                     field.isAutoIncrement && primaryKeys.includes(field.name)
                   ) &&
@@ -223,15 +239,15 @@ export default function ActionPanel({
                   isEnum,
                   enumValues,
                 }) => {
-                  // Check if this is a photo field
-                  if (name === "photo_path" || name === "photo_link") {
+                  // Single photo URL for members (photo_path column deprecated)
+                  if (name === "photo_link") {
                     return (
                       <div
                         key={`${instanceId}-${name}-${type}-${selectedRow?.[name]}`}
                         className="flex flex-col gap-3"
                       >
-                        <label className="font-medium capitalize">
-                          {name.replace(/_/g, " ")}
+                        <label className="font-medium">
+                          Photo URL
                         </label>
                         <div className="flex flex-col gap-4">
                           {/* Image preview */}
@@ -239,7 +255,10 @@ export default function ActionPanel({
                             <div className="h-48 w-48 overflow-hidden rounded-lg border border-gray-200 shadow-sm">
                               {formData[name] ? (
                                 <img
-                                  src={formData[name]}
+                                  src={
+                                    resolveEmbeddablePhotoUrl(formData[name]) ??
+                                    formData[name]
+                                  }
                                   alt="Photo preview"
                                   className="h-full w-full object-cover"
                                   onError={(e) => {
@@ -408,10 +427,19 @@ export default function ActionPanel({
               <button
                 className={`text-medium inline-block max-h-fit max-w-fit cursor-pointer rounded-lg px-3 py-1 font-semibold ${mode === "add" ? "bg-[#C9FFAE]" : "bg-[#E5E7EB]"} items-center justify-center`}
                 onClick={async () => {
+                  const membersPayload = (
+                    row: Record<string, any>,
+                  ): Record<string, any> => {
+                    const base = strip_empty_fields(row);
+                    if (selectedTable !== "members") return base;
+                    const { photo_path: _drop, ...rest } = base;
+                    return { ...rest, photo_path: null };
+                  };
+
                   if (mode === "add") {
                     const { error } = await supabase
                       .from(selectedTable)
-                      .insert(strip_empty_fields(userFormData));
+                      .insert(membersPayload(userFormData));
 
                     if (error) {
                       toast.error(`Error inserting data. ${error.message}`);
@@ -426,7 +454,7 @@ export default function ActionPanel({
                     const { error } = await supabase
                       .from(selectedTable)
                       .update(
-                        strip_empty_fields({ ...formData, ...userFormData }),
+                        membersPayload({ ...formData, ...userFormData }),
                       )
                       .match(
                         Object.fromEntries(

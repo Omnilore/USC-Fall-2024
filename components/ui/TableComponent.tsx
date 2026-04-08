@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect, useRef, Fragment } from "react";
 import UserIcon from "@/components/assets/user-icon.png";
+import { resolveEmbeddablePhotoUrl } from "@/lib/resolve-photo-url";
 import { MoonLoader } from "react-spinners";
 import { Copy } from "lucide-react";
 
@@ -286,9 +287,16 @@ const TableComponent = ({
                               >
                                 <div className="h-12 w-12 overflow-hidden rounded-full border border-gray-300">
                                   <img
-                                    src={item[columnName] || UserIcon.src}
+                                    src={
+                                      (resolveEmbeddablePhotoUrl(
+                                        item[columnName],
+                                      ) ?? item[columnName]) || UserIcon.src
+                                    }
                                     alt=""
                                     className="h-full w-full object-cover"
+                                    onError={(e) => {
+                                      e.currentTarget.src = UserIcon.src;
+                                    }}
                                   />
                                 </div>
                               </td>

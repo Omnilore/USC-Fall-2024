@@ -1,5 +1,6 @@
 import { useRef } from "react";
 import { Copy } from "lucide-react";
+import UserIcon from "@/components/assets/user-icon.png";
 
 interface MemberPanelProps {
   isOpen: boolean;
@@ -73,6 +74,9 @@ export default function MemberPanel({
                       src={selectedRow.Photo}
                       alt="Member Photo"
                       className="h-24 w-24 rounded-full object-cover shadow-sm"
+                      onError={(e) => {
+                        e.currentTarget.src = UserIcon.src;
+                      }}
                     />
                   </div>
                 )}
