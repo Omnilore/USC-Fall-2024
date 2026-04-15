@@ -11,6 +11,31 @@ import ExcelJS from "exceljs";
 import { saveAs } from "file-saver";
 import { effectiveMemberLineProductType } from "@/lib/utils";
 
+/** Mail-in report only has Membership / Forum / Donation rows (no "Other"). */
+type MailInThree = "MEMBERSHIP" | "FORUM" | "DONATION";
+
+function resolveMailInBucket(line: {
+  product_type_override: string | null;
+  products: { type: string } | null;
+}): MailInThree {
+  const eff = effectiveMemberLineProductType(
+    line.products?.type,
+    line.product_type_override,
+  );
+  const eu = eff.toUpperCase();
+  if (eu === "MEMBERSHIP" || eu === "FORUM" || eu === "DONATION") {
+    return eu;
+  }
+
+  const catalog = (line.products?.type ?? "").toUpperCase().trim();
+  if (catalog === "MEMBERSHIP" || catalog === "FORUM" || catalog === "DONATION") {
+    return catalog;
+  }
+
+  // No fourth "Other" row — rare UNKNOWN/HIDDEN without a main bucket
+  return "DONATION";
+}
+
 const TreasurerReqs = () => {
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
@@ -56,6 +81,8 @@ const TreasurerReqs = () => {
   const [stripePayouts, setStripePayouts] = useState<
     Record<string, SupabasePayout>
   >({});
+  /** Keys: `${"MEMBERSHIP"|"FORUM"|"DONATION"}-${year}-${month}` → line amount sum */
+  const [mailInData, setMailInData] = useState<Record<string, number>>({});
   const [fetchPayoutsErr, setFetchPayoutsErr] = useState<string | null>(null);
   const [availableYears, setAvailableYears] = useState<string[]>([]);
 
@@ -69,6 +96,8 @@ const TreasurerReqs = () => {
   }, []);
 
   const categories = ["MEMBERSHIP", "FORUM", "DONATION"];
+
+  const mailInCategories = ["MEMBERSHIP", "FORUM", "DONATION"] as const;
 
   const format = (v: number) =>
     v.toLocaleString("en-US", { style: "currency", currency: "USD" });
@@ -134,6 +163,26 @@ const TreasurerReqs = () => {
           "YTD",
         ],
         rows: stripeRows,
+      },
+      {
+        title: "Mail-in transactions",
+        headers: [
+          "Category",
+          "Jan",
+          "Feb",
+          "Mar",
+          "Apr",
+          "May",
+          "Jun",
+          "Jul",
+          "Aug",
+          "Sep",
+          "Oct",
+          "Nov",
+          "Dec",
+          "YTD",
+        ],
+        rows: mailInRows,
       },
     ];
 
@@ -264,6 +313,26 @@ const TreasurerReqs = () => {
       ],
     ];
 
+    const mailInRowsFull = mailInCategories.map((cat) => {
+      const row: any[] = [
+        cat.charAt(0).toUpperCase() + cat.slice(1).toLowerCase(),
+      ];
+      let ytd = 0;
+      for (let month = 1; month <= 12; month++) {
+        const monthInRange = monthsInRange.find((m) => m.month === month);
+        if (monthInRange) {
+          const key = `${cat}-${monthInRange.year}-${month}`;
+          const v = mailInData[key] ?? 0;
+          ytd += v;
+          row.push(v.toFixed(2));
+        } else {
+          row.push("");
+        }
+      }
+      row.push(ytd.toFixed(2));
+      return row;
+    });
+
     const reportSections = [
       {
         title: "Squarespace",
@@ -324,6 +393,26 @@ const TreasurerReqs = () => {
           "YTD",
         ],
         rows: stripeRowsFull,
+      },
+      {
+        title: "Mail-in transactions",
+        headers: [
+          "Category",
+          "Jan",
+          "Feb",
+          "Mar",
+          "Apr",
+          "May",
+          "Jun",
+          "Jul",
+          "Aug",
+          "Sep",
+          "Oct",
+          "Nov",
+          "Dec",
+          "YTD",
+        ],
+        rows: mailInRowsFull,
       },
     ];
 
@@ -853,6 +942,52 @@ const TreasurerReqs = () => {
     setStripeFee(stripe_fee);
     setStripeNet(stripe_net);
     setStripePayout(stripe_payout);
+
+    const mail_in: Record<string, number> = {};
+    const { data: mailTransactions, error: mailTxError } = await supabase
+      .from("transactions")
+      .select(
+        `
+        id,
+        date,
+        members_to_transactions (
+          amount,
+          product_type_override,
+          products ( type )
+        )
+      `,
+      )
+      .eq("payment_platform", "MAIL")
+      .gte("date", fromDateValue)
+      .lte("date", toDateValue);
+
+    if (mailTxError) {
+      console.error("Mail-in financial summary:", mailTxError.message);
+      setMailInData({});
+    } else {
+      for (const t of mailTransactions ?? []) {
+        const d = new Date(t.date as string);
+        const year = d.getUTCFullYear();
+        const month = d.getUTCMonth() + 1;
+        const inRange = range.some((r) => r.year === year && r.month === month);
+        if (!inRange) continue;
+
+        const lines = t.members_to_transactions as
+          | {
+              amount: number;
+              product_type_override: string | null;
+              products: { type: string } | null;
+            }[]
+          | null;
+
+        for (const line of lines ?? []) {
+          const bucket = resolveMailInBucket(line);
+          const key = `${bucket}-${year}-${month}`;
+          mail_in[key] = (mail_in[key] ?? 0) + Number(line.amount);
+        }
+      }
+      setMailInData(mail_in);
+    }
   };
 
   const getTotalLabel = () => {
@@ -994,6 +1129,18 @@ const TreasurerReqs = () => {
       (getRangeTotal(stripePayout) / 100).toFixed(2),
     ],
   ];
+
+  const mailInRows = mailInCategories.map((cat) => {
+    const label =
+      cat.charAt(0).toUpperCase() + cat.slice(1).toLowerCase();
+    return [
+      label,
+      ...monthsInRange.map(({ year, month }) =>
+        (mailInData[`${cat}-${year}-${month}`] ?? 0).toFixed(2),
+      ),
+      getCatRangeTotal(mailInData, cat).toFixed(2),
+    ];
+  });
 
   // // Donation rows
   // const donationRows = donors.flatMap((donor) => {
@@ -1674,6 +1821,79 @@ const TreasurerReqs = () => {
                             })}
                             <td className="sticky right-0 border bg-gray-100 p-2 font-bold"></td>
                           </tr>
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div className="sticky left-0 z-10 bg-white pb-2">
+                      <h2 className="mt-8 mb-2 text-base font-semibold">
+                        Mail-in transactions
+                      </h2>
+                    </div>
+
+                    <div className="mb-10">
+                      <table className="w-full table-fixed border-collapse rounded-lg bg-white text-sm shadow-sm">
+                        <thead>
+                          <tr className="bg-gray-100 text-center">
+                            <th
+                              rowSpan={2}
+                              className="sticky left-0 z-20 w-32 border bg-gray-100 p-2"
+                            >
+                              Category
+                            </th>
+                            {monthsInRange.map(({ year, month }) => (
+                              <th
+                                key={`mailin-head-${year}-${month}`}
+                                className="w-64 border p-2 text-center"
+                              >
+                                {new Date(year, month - 1).toLocaleString(
+                                  "default",
+                                  {
+                                    month: "short",
+                                    year: "numeric",
+                                  },
+                                )}
+                              </th>
+                            ))}
+                            <th
+                              rowSpan={2}
+                              className="sticky right-0 z-10 w-32 border bg-gray-100 p-2 text-center"
+                            >
+                              {getTotalLabel()}
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {mailInCategories.map((cat, catIndex) => (
+                            <tr key={`mailin-${cat}`}>
+                              <td className="sticky left-0 z-20 border bg-gray-100 p-2 font-semibold">
+                                {cat.charAt(0).toUpperCase() +
+                                  cat.slice(1).toLowerCase()}
+                              </td>
+                              {monthsInRange.map(({ year, month }, monthIndex) => {
+                                const key = `${cat}-${year}-${month}`;
+                                const isAlternateMonth = monthIndex % 2 === 1;
+                                const bgColor = isAlternateMonth
+                                  ? catIndex % 2 === 1
+                                    ? "bg-orange-100"
+                                    : "bg-orange-50"
+                                  : catIndex % 2 === 1
+                                    ? "bg-gray-100"
+                                    : "";
+                                return (
+                                  <td
+                                    key={`mailin-${cat}-${year}-${month}`}
+                                    className={`border border-l-2 border-r-2 border-l-gray-400 border-r-gray-400 p-2 text-center ${bgColor}`}
+                                  >
+                                    {format(mailInData[key] ?? 0)}
+                                  </td>
+                                );
+                              })}
+                              <td className="sticky right-0 border bg-gray-100 p-2 font-bold">
+                                {format(getCatRangeTotal(mailInData, cat))}
+                              </td>
+                            </tr>
+                          ))}
                         </tbody>
                       </table>
                     </div>
