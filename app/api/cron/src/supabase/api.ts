@@ -15,13 +15,18 @@ import type {
   SupabaseTransactionInsert,
 } from "./types";
 import { createClient } from "@supabase/supabase-js";
+import { getSupabaseProjectUrl } from "@/lib/supabase-project";
 
 // THIS IS SUPER SECRET SERVICE KEY!
 // DO NOT USE UNLESS YOU WANT USER TO HAVE READ/WRITE ACCESS TO ALL DATA
 // NEVER USE ON CLIENT SIDE, ONLY SERVER SIDE
+const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+if (!serviceRoleKey) {
+  throw new Error("Missing SUPABASE_SERVICE_ROLE_KEY");
+}
 const supabase = createClient<Database>(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
+  getSupabaseProjectUrl(),
+  serviceRoleKey,
   {
     auth: {
       autoRefreshToken: false,

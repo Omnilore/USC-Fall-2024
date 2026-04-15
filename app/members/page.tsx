@@ -2,6 +2,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { getRoles, signOut, getMembershipLink } from "@/app/supabase";
 import UserIcon from "@/components/assets/user-icon.png";
+import { resolveEmbeddablePhotoUrl } from "@/lib/resolve-photo-url";
 import { queryTableWithFields } from "@/app/queryFunctions";
 import NavBar from "@/components/ui/NavBar";
 import TableComponent from "@/components/ui/TableComponent";
@@ -214,8 +215,12 @@ export default function Search() {
         member.state,
         member.zip_code,
       ].filter(Boolean);
+      const rawPhoto = member.photo_link?.trim();
+      const photoSrc = rawPhoto
+        ? (resolveEmbeddablePhotoUrl(rawPhoto) ?? rawPhoto)
+        : UserIcon.src;
       return {
-        Photo: member.photo_link || UserIcon.src,
+        Photo: photoSrc,
         Name: name,
         Address: addressParts.join(", "),
         "Phone Number": member.phone || "",

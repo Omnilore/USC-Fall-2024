@@ -341,6 +341,13 @@ const fetchMemberTransactions = async (memberId: number) => {
         return;
       }
 
+      const { error: userErr } = await supabase.auth.getUser();
+      if (userErr) {
+        alert(
+          `Session could not be refreshed (${userErr.message}). Try signing out and back in.`,
+        );
+        return;
+      }
       const {
         data: { session },
       } = await supabase.auth.getSession();

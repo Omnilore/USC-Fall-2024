@@ -1,16 +1,11 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "@/app/api/cron/src/supabase/types";
+import { getSupabaseAnonKey, getSupabaseProjectUrl } from "@/lib/supabase-project";
 
 export async function GET(request: Request) {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !anonKey) {
-    return NextResponse.json(
-      { error: "Server misconfigured" },
-      { status: 500 },
-    );
-  }
+  const url = getSupabaseProjectUrl();
+  const anonKey = getSupabaseAnonKey();
 
   const auth = request.headers.get("authorization");
   if (!auth?.startsWith("Bearer ")) {
