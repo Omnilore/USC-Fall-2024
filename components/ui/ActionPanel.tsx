@@ -331,7 +331,7 @@ export default function ActionPanel({
                           {name.replace(/_/g, " ")}
                         </label>
                         <select
-                          value={formData[name] || ""}
+                          value={userFormData[name] ?? formData[name] ?? ""}
                           onChange={(e) => setUserFormData({
                             ...userFormData,
                             [name]: e.target.value || null

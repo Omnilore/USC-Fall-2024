@@ -598,6 +598,14 @@ const fetchMemberTransactions = async (memberId: number) => {
     fetchEntries();
   }, [selectedTable,includeServiceLogs]);
 
+  useEffect(() => {
+    if (!selectedRow || !entries.length || !primaryKeys.length) return;
+    const match = entries.find((row) =>
+      primaryKeys.every((pk) => row[pk] === selectedRow[pk]),
+    );
+    if (match) setSelectedRow(match);
+  }, [entries]);
+
   const hasPermission = (action: keyof Permission) => {
     if (!selectedTable) return false;
 
