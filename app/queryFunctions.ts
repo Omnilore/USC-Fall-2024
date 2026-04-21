@@ -18,7 +18,11 @@ export const queryTableWithPrimaryKey = async (
 
   if (table === "audit_logs") {
     if (options?.includeServiceLogs === false) {
-      query = query.neq("source", "service");
+      // Same rule as `isAutomatedAuditSource`: no "cron" substring, not service account.
+      // Chained `.not().not()` avoids fragile `or(and(...))` PostgREST strings (those 400 locally).
+      query = query
+        .not("source", "ilike", "%cron%")
+        .not("source", "ilike", "service");
     }
 
     query = query
@@ -41,7 +45,12 @@ export const queryTableWithPrimaryKey = async (
   const { data, error } = await query;
 
   if (error) {
-    console.error(`Error fetching data from table ${table}:`, error);
+    console.error(
+      `Error fetching data from table ${table}:`,
+      error.message,
+      error.code,
+      error,
+    );
     throw error;
   }
 

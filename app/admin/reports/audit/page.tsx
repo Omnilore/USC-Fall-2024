@@ -7,6 +7,7 @@ import ExcelJS from "exceljs";
 import { saveAs } from "file-saver";
 import { MoonLoader } from "react-spinners";
 import { Temporal } from "temporal-polyfill";
+import { isAutomatedAuditSource } from "@/lib/audit-log-source";
 
 type AuditLog = {
   id: string;
@@ -182,9 +183,9 @@ export default function AuditReportPage() {
   }, [logs]);
 
   const filteredLogs = useMemo(() => {
-    const isCron = (src: string | null | undefined) =>
-      (src ?? "").toLowerCase().includes("cron");
-    return hideCron ? logs.filter((log) => !isCron(log.source)) : logs;
+    return hideCron
+      ? logs.filter((log) => !isAutomatedAuditSource(log.source))
+      : logs;
   }, [hideCron, logs]);
 
   const exportToCSV = () => {

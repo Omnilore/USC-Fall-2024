@@ -15,6 +15,7 @@ import { useLocalStorage } from "@uidotdev/usehooks";
 import { ClientOnly } from "@/components/is-client";
 import { supabase } from "@/app/supabase";
 import { effectiveMemberLineProductType, formatDate } from "@/lib/utils";
+import { isAutomatedAuditSource } from "@/lib/audit-log-source";
 
 const RECHARACTERIZE_SELECT_VALUES = [
   "MEMBERSHIP",
@@ -74,6 +75,8 @@ function Table() {
   const [isAssignPanelOpen, setIsAssignPanelOpen] = useState(false);
   const [isDeletePanelOpen, setIsDeletePanelOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  /** True while Supabase is loading the current table slice (e.g. newest 1000 audit rows). */
+  const [isFetchingEntries, setIsFetchingEntries] = useState(false);
   
   // Transaction modal state
   const [showTransactions, setShowTransactions] = useState(false);
@@ -96,7 +99,7 @@ function Table() {
     const filteredEntries = useMemo(() => {
       let base = entries;
       if (selectedTable === "audit_logs" && !includeServiceLogs) {
-            base = base.filter((row) => row?.source !== "service");
+        base = base.filter((row) => !isAutomatedAuditSource(row?.source));
       }
     const keywords = query.toLowerCase().split(" ").filter(Boolean);
     return base.filter((item) =>
@@ -538,6 +541,7 @@ const fetchMemberTransactions = async (memberId: number) => {
 
   const fetchEntries = async () => {
     if (!selectedTable) return;
+    setIsFetchingEntries(true);
     try {
       const { data: rawData, primaryKeys } =
         await queryTableWithPrimaryKey(selectedTable,
@@ -584,6 +588,8 @@ const fetchMemberTransactions = async (memberId: number) => {
         error
       );
       console.error("Error details:", JSON.stringify(error, null, 2));
+    } finally {
+      setIsFetchingEntries(false);
     }
   };
 
@@ -804,14 +810,26 @@ const fetchMemberTransactions = async (memberId: number) => {
                   </div> */}
                   <div className="flex items-center gap-4">
                     {selectedTable === "audit_logs" && (
-                      <label className="flex items-center gap-2 rounded-lg bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                      <label
+                        className={`flex items-center gap-2 rounded-lg bg-white px-3 py-2 text-sm text-gray-700 ${
+                          isFetchingEntries
+                            ? "cursor-wait opacity-80"
+                            : "hover:bg-gray-50"
+                        }`}
+                      >
                         <input
                           type="checkbox"
                           checked={includeServiceLogs}
+                          disabled={isFetchingEntries}
                           onChange={(e) => setIncludeServiceLogs(e.target.checked)}
                           className="h-4 w-4"
                         />
-                        Include cron/service logs
+                        <span>Include cron/service logs</span>
+                        {isFetchingEntries && (
+                          <span className="text-xs text-gray-500">
+                            Loading newest rows…
+                          </span>
+                        )}
                       </label>
                     )}
 
