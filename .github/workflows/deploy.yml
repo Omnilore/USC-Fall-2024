@@ -55,7 +55,7 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
           head -1 ~/.ssh/deploy_key | cat -A
           wc -l ~/.ssh/deploy_key
-          ssh-keygen -y -f ~/.ssh/deploy_key > /dev/null
+          ssh-keygen -y -f ~/.ssh/deploy_key 2>&1 || echo "ssh-keygen failed with exit code $?"
           ssh-keyscan -p "$EC2_PORT" -H "$EC2_HOST" >> ~/.ssh/known_hosts
 
       - name: Upload build to EC2
