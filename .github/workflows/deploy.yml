@@ -45,14 +45,18 @@ jobs:
         run: tar -czf deploy.tar.gz deploy_bundle
 
       - name: Set up SSH
+        env:
+          SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_PORT: ${{ secrets.EC2_PORT }}
         run: |
           mkdir -p ~/.ssh
-          cat > ~/.ssh/deploy_key << 'EOF'
-          ${{ secrets.EC2_SSH_KEY }}
-          EOF
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
+          head -1 ~/.ssh/deploy_key | cat -A
+          wc -l ~/.ssh/deploy_key
           ssh-keygen -y -f ~/.ssh/deploy_key > /dev/null
-          ssh-keyscan -p ${{ secrets.EC2_PORT }} -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
+          ssh-keyscan -p "$EC2_PORT" -H "$EC2_HOST" >> ~/.ssh/known_hosts
 
       - name: Upload build to EC2
         run: |
