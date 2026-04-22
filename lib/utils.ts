@@ -67,3 +67,70 @@ export function formatDateShort(isoDate: string): string {
     return isoDate;
   }
 }
+
+function monthNameFromMm(mm: string): string {
+  const m = Number(mm);
+  if (m < 1 || m > 12) return "-";
+  return new Date(2000, m - 1, 1).toLocaleString("en-US", { month: "long" });
+}
+
+/**
+ * Format a partial date stored as text:
+ * - YYYY — year only
+ * - YYYY-MM — year + month
+ * - YYYY-MM-DD — full date
+ * - MM-DD or --MM-DD — month + day only (unknown year)
+ *
+ * Missing parts are shown as "-" when any part is unknown; full dates use a normal long form.
+ */
+export function formatPartialDate(value: string | null | undefined): string {
+  if (value == null || value.trim() === "") return "";
+  const v = value.trim();
+
+  // Month + day only: --07-15 or 07-15
+  if (/^--\d{2}-\d{2}$/.test(v)) {
+    const [, , mm, dd] = v.split("-");
+    return `- / ${monthNameFromMm(mm)} / ${String(Number(dd))}`;
+  }
+  if (/^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(v)) {
+    const [mm, dd] = v.split("-");
+    return `- / ${monthNameFromMm(mm)} / ${String(Number(dd))}`;
+  }
+
+  // Full date — all parts known
+  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) {
+    const date = new Date(v + "T12:00:00");
+    if (!isNaN(date.getTime())) {
+      return date.toLocaleDateString("en-US", {
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+        timeZone: "America/Los_Angeles",
+      });
+    }
+  }
+
+  // Year only
+  if (/^\d{4}$/.test(v)) {
+    return `${v} / - / -`;
+  }
+
+  // Year + month
+  if (/^\d{4}-\d{2}$/.test(v)) {
+    const [y, mm] = v.split("-");
+    return `${y} / ${monthNameFromMm(mm)} / -`;
+  }
+
+  return v;
+}
+
+/** `products.type` for a catalog line, optionally overridden on `members_to_transactions`. */
+export function effectiveMemberLineProductType(
+  catalogType: string | null | undefined,
+  override: string | null | undefined,
+): string {
+  const o = override?.trim();
+  if (o) return o.toUpperCase();
+  const c = catalogType?.trim();
+  return c ? c.toUpperCase() : "UNKNOWN";
+}

@@ -7,7 +7,7 @@ import SelectDropdown from "@/components/ui/SelectDropdown";
 import ExcelJS from "exceljs";
 import { saveAs } from "file-saver";
 import { usePartnerNavigation } from "@/hooks/use-partner-navigation";
-import { cn } from "@/lib/utils";
+import { cn, effectiveMemberLineProductType } from "@/lib/utils";
 
 export default function MembershipReports() {
   const [members, setMembers] = useState<any[]>([]);
@@ -361,15 +361,21 @@ export default function MembershipReports() {
         return;
       }
 
-    const { data: mtt, error: mttError } = await supabase
+    const { data: mttRaw, error: mttError } = await supabase
       .from("members_to_transactions")
-      .select("member_id, transaction_id, sku")
+      .select("member_id, transaction_id, sku, product_type_override")
       .in("sku", validSkus);
 
     if (mttError) {
       console.error("Failed to fetch members_to_transactions", mttError);
       return;
     }
+
+    const mtt = (mttRaw ?? []).filter(
+      (row) =>
+        effectiveMemberLineProductType("MEMBERSHIP", row.product_type_override) ===
+        "MEMBERSHIP",
+    );
 
     let filteredMemberIds: (string | number)[] = [];
 
@@ -481,14 +487,22 @@ const formatted = mtt
     const memberIds = formatted.map(m => m.id).filter((id): id is number => !!id);
 
     if (memberIds.length > 0) {
-      const { data: transactionData, error: txError } = await supabase
-        .from('members_to_transactions')
-        .select('transaction_id, member_id, sku')
-        .in('member_id', memberIds)
-        .in('sku', validSkus);
+      const { data: transactionDataRaw, error: txError } = await supabase
+        .from("members_to_transactions")
+        .select("transaction_id, member_id, sku, product_type_override")
+        .in("member_id", memberIds)
+        .in("sku", validSkus);
 
-      if (!txError && transactionData) {
-        const txIds = transactionData.map(t => t.transaction_id);
+      const transactionData = (transactionDataRaw ?? []).filter(
+        (row) =>
+          effectiveMemberLineProductType(
+            "MEMBERSHIP",
+            row.product_type_override,
+          ) === "MEMBERSHIP",
+      );
+
+      if (!txError && transactionData.length > 0) {
+        const txIds = transactionData.map((t) => t.transaction_id);
         
         const { data: txAmounts, error: amountError } = await supabase
           .from('transactions')

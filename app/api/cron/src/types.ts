@@ -21,7 +21,10 @@ export type IssueCode =
   | "VALIDATION_ERROR";
 
 export type PaypalTransactionSearchResponse = {
-  transaction_details: {
+  name?: string;
+  message?: string;
+  debug_id?: string;
+  transaction_details?: {
     // not all fields are present in this type
     transaction_info: {
       // not all fields are present in this type
@@ -42,19 +45,20 @@ export type PaypalTransactionSearchResponse = {
       };
     };
   }[];
-  account_number: string;
-  page: number;
-  total_items: number;
-  total_pages: number;
-  links: {
+  account_number?: string;
+  page?: number;
+  total_items?: number;
+  total_pages?: number;
+  links?: {
     href: string;
     rel: string;
     method?: string;
   }[];
 };
 
-export type PaypalTransactionInfo =
-  PaypalTransactionSearchResponse["transaction_details"][number]["transaction_info"];
+export type PaypalTransactionInfo = NonNullable<
+  PaypalTransactionSearchResponse["transaction_details"]
+>[number]["transaction_info"];
 
 export type MailInOrderData = {
   date: Date;

@@ -1,6 +1,7 @@
 "use client";
 
 import { supabase } from "@/app/supabase";
+import { effectiveMemberLineProductType } from "@/lib/utils";
 import { useState, useEffect, useMemo } from "react";
 import MultiSelectDropdown from "@/components/ui/MultiSelectDropdown";
 import SelectDropdown from "@/components/ui/SelectDropdown";
@@ -188,7 +189,7 @@ export default function TransactionsReports() {
 
       const { data: mtt, error: mttError } = await supabase
         .from("members_to_transactions")
-        .select("transaction_id, member_id, sku")
+        .select("transaction_id, member_id, sku, product_type_override")
         .in("sku", allSkus);
 
       if (mttError) {
@@ -258,19 +259,23 @@ export default function TransactionsReports() {
           const memberEntry = mtt.find((m) => m.transaction_id === t.id);
           const member = memberMap[memberEntry?.member_id ?? ""];
 
-          // 1. Base type from product/sku
+          // 1. Base type from catalog + optional per-line override
           let transactionType: string = "UNKNOWN";
           if (memberEntry?.sku) {
-            const productType = skuTypeMap[memberEntry.sku];
+            const catalogType = skuTypeMap[memberEntry.sku] as string;
+            const productType = effectiveMemberLineProductType(
+              catalogType,
+              memberEntry.product_type_override,
+            );
 
             if (
-              (productType as string) === "DONATION" ||
-              (productType as string) === "FORUM" ||
-              (productType as string) === "MEMBERSHIP" ||
-              (productType as string) === "REFUND"
+              productType === "DONATION" ||
+              productType === "FORUM" ||
+              productType === "MEMBERSHIP" ||
+              productType === "REFUND"
             ) {
-              transactionType = productType as string;
-            }            
+              transactionType = productType;
+            }
           }
 
           // 2. Override type if refunded_amount > 0

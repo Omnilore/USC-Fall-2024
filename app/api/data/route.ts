@@ -1,7 +1,24 @@
 import { NextResponse } from "next/server";
-import { getDataForTable } from "@/app/supabase";
+import { createClient } from "@supabase/supabase-js";
+import type { Database } from "@/app/api/cron/src/supabase/types";
+import { getSupabaseAnonKey, getSupabaseProjectUrl } from "@/lib/supabase-project";
 
 export async function GET(request: Request) {
+  const url = getSupabaseProjectUrl();
+  const anonKey = getSupabaseAnonKey();
+
+  const auth = request.headers.get("authorization");
+  if (!auth?.startsWith("Bearer ")) {
+    return NextResponse.json(
+      { error: "Authorization Bearer token required" },
+      { status: 401 },
+    );
+  }
+
+  const supabase = createClient<Database>(url, anonKey, {
+    global: { headers: { Authorization: auth } },
+  });
+
   const { searchParams } = new URL(request.url);
   const table = searchParams.get("table");
 
@@ -12,7 +29,14 @@ export async function GET(request: Request) {
   }
 
   try {
-    const data = await getDataForTable(table as any);
+    const { data, error } = await supabase.from(table as never).select("*");
+    if (error) {
+      console.error(`Failed to fetch data for table ${table}:`, error.message);
+      return NextResponse.json(
+        { error: error.message },
+        { status: 400 },
+      );
+    }
     return NextResponse.json(data ?? []);
   } catch (error) {
     console.error(`Failed to fetch data for table ${table}:`, error);

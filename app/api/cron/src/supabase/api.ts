@@ -15,13 +15,18 @@ import type {
   SupabaseTransactionInsert,
 } from "./types";
 import { createClient } from "@supabase/supabase-js";
+import { getSupabaseProjectUrl } from "@/lib/supabase-project";
 
 // THIS IS SUPER SECRET SERVICE KEY!
 // DO NOT USE UNLESS YOU WANT USER TO HAVE READ/WRITE ACCESS TO ALL DATA
 // NEVER USE ON CLIENT SIDE, ONLY SERVER SIDE
+const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+if (!serviceRoleKey) {
+  throw new Error("Missing SUPABASE_SERVICE_ROLE_KEY");
+}
 const supabase = createClient<Database>(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
+  getSupabaseProjectUrl(),
+  serviceRoleKey,
   {
     auth: {
       autoRefreshToken: false,
@@ -162,14 +167,21 @@ export const upsert = {
   },
 
   payouts: async (payoutsToUpsert: SupabasePayoutInsert[]) => {
-    const { error } = await supabase.rpc("upsert_payouts", {
-      _payouts: payoutsToUpsert,
-    });
+    if (payoutsToUpsert.length === 0) return;
 
-    if (error)
-      throw new Error(
-        `Failed to upsert payouts. ${error.hint}. ${error.message}`,
-      );
+    // Avoid PostgREST ambiguity when both upsert_payouts(json) and upsert_payouts(jsonb) exist.
+    const batchSize = 200;
+    for (let i = 0; i < payoutsToUpsert.length; i += batchSize) {
+      const batch = payoutsToUpsert.slice(i, i + batchSize);
+      const { error } = await supabase.from("payouts").upsert(batch, {
+        onConflict: "payment_platform,payout_id",
+      });
+
+      if (error)
+        throw new Error(
+          `Failed to upsert payouts. ${error.hint ?? ""} ${error.message}`,
+        );
+    }
   },
 };
 

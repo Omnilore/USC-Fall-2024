@@ -1,7 +1,7 @@
 "use client";
-import { useState, useEffect, useRef, Fragment } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, Fragment } from "react";
 import UserIcon from "@/components/assets/user-icon.png";
-import { MoonLoader } from "react-spinners";
+import { resolveEmbeddablePhotoUrl } from "@/lib/resolve-photo-url";
 import { Copy } from "lucide-react";
 
 interface TableComponentProps {
@@ -57,22 +57,13 @@ const TableComponent = ({
   > | null>(selectedRow);
   const [columnWidths, setColumnWidths] = useState<number[]>([]);
   const headerRefs = useRef<(HTMLTableCellElement | null)[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
 
-  useEffect(() => {
-    setLoading(true);
-    const timer = setTimeout(() => {
-      setLoading(false);
-    }, 200); // Simulate data loading time
-    return () => clearTimeout(timer);
-  }, [entries]);
-
-  useEffect(() => {
-    if (!loading && headerRefs.current.length > 0) {
+  useLayoutEffect(() => {
+    if (headerRefs.current.length > 0) {
       const newWidths = headerRefs.current.map((th) => th?.offsetWidth || 50);
       setColumnWidths(newWidths);
     }
-  }, [loading, entries, primaryKeys]);
+  }, [entries, primaryKeys]);
 
   const handleRowClick = (row: Record<string, any>) => {
     if (localSelectedRow !== row) {
@@ -98,16 +89,6 @@ const TableComponent = ({
     return (
       <div className="py-4 text-center text-gray-500">
         You do not have the necessary permissions to view this data.
-      </div>
-    );
-  }
-
-  if (loading) {
-    return (
-      <div className="flex h-full w-full items-center justify-center">
-        <div className="text-gray-500">
-          <MoonLoader />
-        </div>
       </div>
     );
   }
@@ -286,9 +267,16 @@ const TableComponent = ({
                               >
                                 <div className="h-12 w-12 overflow-hidden rounded-full border border-gray-300">
                                   <img
-                                    src={item[columnName] || UserIcon.src}
+                                    src={
+                                      (resolveEmbeddablePhotoUrl(
+                                        item[columnName],
+                                      ) ?? item[columnName]) || UserIcon.src
+                                    }
                                     alt=""
                                     className="h-full w-full object-cover"
+                                    onError={(e) => {
+                                      e.currentTarget.src = UserIcon.src;
+                                    }}
                                   />
                                 </div>
                               </td>

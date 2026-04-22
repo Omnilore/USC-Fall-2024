@@ -8,12 +8,30 @@ import SelectDropdown from "@/components/ui/SelectDropdown";
 import SearchInput from "@/components/ui/SearchInput";
 import { queryTableWithPrimaryKey, TableName } from "@/app/queryFunctions";
 import ActionPanel from "@/components/ui/ActionPanel";
+import AssignPanel from "@/components/ui/AssignPanel";
 import DeletePanel from "@/components/ui/DeletePanel";
 import { MoonLoader } from "react-spinners";
 import { useLocalStorage } from "@uidotdev/usehooks";
 import { ClientOnly } from "@/components/is-client";
 import { supabase } from "@/app/supabase";
-import { formatDate } from "@/lib/utils";
+import { effectiveMemberLineProductType, formatDate } from "@/lib/utils";
+import { isAutomatedAuditSource } from "@/lib/audit-log-source";
+
+const RECHARACTERIZE_SELECT_VALUES = [
+  "MEMBERSHIP",
+  "FORUM",
+  "DONATION",
+  "UNKNOWN",
+  "HIDDEN",
+  "REFUND",
+] as const;
+
+function recharacterizeSelectValue(productType: string): string {
+  const u = String(productType).trim().toUpperCase();
+  return (RECHARACTERIZE_SELECT_VALUES as readonly string[]).includes(u)
+    ? u
+    : "MEMBERSHIP";
+}
 
 export default function () {
   return (
@@ -22,6 +40,8 @@ export default function () {
     </ClientOnly>
   );
 }
+
+const ASSIGN_TABLES = new Set(["committee_members", "sdg_members", "leadership"]);
 
 function Table() {
   const [query, setQuery] = useState("");
@@ -39,19 +59,24 @@ function Table() {
     "selected_table",
     "members",
   );
+
   const [selectedSort, setSelectedSort] = useLocalStorage<string>(
-    `selected_sort_${selectedTable}`,
+    `selected_sort_${String(selectedTable)}`,
     "default",
   );
   const [selectedSortWay, setSelectedSortWay] = useLocalStorage<"asc" | "desc">(
-    `selected_sort_way_${selectedTable}`,
+    `selected_sort_way_${String(selectedTable)}`,
     "asc",
   );
+
   const [sortOptions, setSortOptions] = useState<string[]>(["default"]);
   const [primaryKeys, setPrimaryKeys] = useState<string[]>([]);
   const [isEntryPanelOpen, setIsEntryPanelOpen] = useState(false);
+  const [isAssignPanelOpen, setIsAssignPanelOpen] = useState(false);
   const [isDeletePanelOpen, setIsDeletePanelOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  /** True while Supabase is loading the current table slice (e.g. newest 1000 audit rows). */
+  const [isFetchingEntries, setIsFetchingEntries] = useState(false);
   
   // Transaction modal state
   const [showTransactions, setShowTransactions] = useState(false);
@@ -74,9 +99,8 @@ function Table() {
     const filteredEntries = useMemo(() => {
       let base = entries;
       if (selectedTable === "audit_logs" && !includeServiceLogs) {
-            base = base.filter((row) => row?.source !== "service");
+        base = base.filter((row) => !isAutomatedAuditSource(row?.source));
       }
-
     const keywords = query.toLowerCase().split(" ").filter(Boolean);
     return base.filter((item) =>
       keywords.every((kw) =>
@@ -153,16 +177,14 @@ function Table() {
     });
   }, [filteredEntries, selectedSort, selectedSortWay]);
 
-// Fetch member transactions
+// One row per members_to_transactions line (supports distinct overrides per payment)
 const fetchMemberTransactions = async (memberId: number) => {
   try {
-    const { data: memberTransactions, error: mttError } = await supabase
+    const { data: mttRows, error: mttError } = await supabase
       .from("members_to_transactions")
-      .select(`
-        transaction_id,
-        amount,
-        sku
-      `)
+      .select(
+        "transaction_id, line_item_index, amount, sku, product_type_override",
+      )
       .eq("member_id", memberId);
 
     if (mttError) {
@@ -170,15 +192,16 @@ const fetchMemberTransactions = async (memberId: number) => {
       return [];
     }
 
-    if (!memberTransactions || memberTransactions.length === 0) {
+    if (!mttRows || mttRows.length === 0) {
       return [];
     }
 
-    const transactionIds = memberTransactions.map(mt => mt.transaction_id);
+    const transactionIds = [...new Set(mttRows.map((mt) => mt.transaction_id))];
 
     const { data: transactions, error: txError } = await supabase
       .from("transactions")
-      .select(`
+      .select(
+        `
         id,
         date,
         payment_platform,
@@ -187,7 +210,8 @@ const fetchMemberTransactions = async (memberId: number) => {
         amount,
         created_at,
         sqsp_id
-      `)
+      `,
+      )
       .in("id", transactionIds)
       .order("date", { ascending: false });
 
@@ -196,7 +220,7 @@ const fetchMemberTransactions = async (memberId: number) => {
       return [];
     }
 
-    const skus = [...new Set(memberTransactions.map((mt) => mt.sku))];
+    const skus = [...new Set(mttRows.map((mt) => mt.sku))];
 
     const { data: products = [], error: productError } = await supabase
       .from("products")
@@ -208,63 +232,73 @@ const fetchMemberTransactions = async (memberId: number) => {
     }
 
     const productMap = Object.fromEntries(
-      (products ?? []).map((p) => [p.sku, p])
+      (products ?? []).map((p) => [p.sku, p]),
     );
 
-    const mttMap = Object.fromEntries(
-      memberTransactions.map(mt => [mt.transaction_id, mt])
+    const transactionMap = Object.fromEntries(
+      (transactions ?? []).map((t) => [t.id, t]),
     );
 
-    const processedTransactions = transactions.map(transaction => {
-      const mt = mttMap[transaction.id];
-      if (!mt) return null;
+    const processedTransactions = mttRows
+      .map((mt) => {
+        const transaction = transactionMap[mt.transaction_id];
+        if (!transaction) return null;
 
-      const product = productMap[mt.sku];
-      
-      let display_status = "Completed";
+        const product = productMap[mt.sku];
+        const catalogType = String(product?.type ?? "UNKNOWN").trim().toUpperCase();
+        const effectiveType = effectiveMemberLineProductType(
+          catalogType,
+          mt.product_type_override,
+        );
 
-      if (transaction.refunded_amount > 0) {
-        if (transaction.refunded_amount === transaction.amount) {
-          display_status = "Fully Refunded";
+        let display_status = "Completed";
+
+        if (transaction.refunded_amount > 0) {
+          if (transaction.refunded_amount === transaction.amount) {
+            display_status = "Fully Refunded";
+          } else {
+            display_status = "Partially Refunded";
+          }
+        } else if (transaction.fulfillment_status === "CANCELED") {
+          display_status = "Canceled";
+        } else if (transaction.fulfillment_status === "PENDING") {
+          display_status = "Pending";
+        } else if (transaction.fulfillment_status === "FULFILLED") {
+          display_status = "Completed";
         } else {
-          display_status = "Partially Refunded";
+          display_status = transaction.fulfillment_status || "Unknown";
         }
-      } else if (transaction.fulfillment_status === "CANCELED") {
-        display_status = "Canceled";
-      } else if (transaction.fulfillment_status === "PENDING") {
-        display_status = "Pending";
-      } else if (transaction.fulfillment_status === "FULFILLED") {
-        display_status = "Completed";
-      } else {
-        display_status = transaction.fulfillment_status || "Unknown";
-      }
 
-      return {
-        transaction_id: transaction.id,
-        amount: mt.amount,
-        sku: mt.sku,
-        date: transaction.date,
-        payment_platform: transaction.payment_platform,
-        fulfillment_status: transaction.fulfillment_status,
-        refunded_amount: transaction.refunded_amount,
-        total_amount: transaction.amount,
-        created_at: transaction.created_at,
-        sqsp_id: transaction.sqsp_id,
-        product_descriptor: product?.descriptor || "Unknown",
-        product_type: product?.type || "Unknown",
-        display_status,
-      };
-    })
-    .filter((t): t is NonNullable<typeof t> => t !== null);
+        const isRefund =
+          (transaction.refunded_amount ?? 0) > 0 ||
+          transaction.fulfillment_status === "CANCELED";
 
-    // Sort: refunds/recharacterized at top, then newest first
+        return {
+          transaction_id: transaction.id,
+          line_item_index: Number(mt.line_item_index ?? 0),
+          amount: mt.amount,
+          sku: mt.sku,
+          date: transaction.date,
+          payment_platform: transaction.payment_platform,
+          fulfillment_status: transaction.fulfillment_status,
+          refunded_amount: transaction.refunded_amount,
+          total_amount: transaction.amount,
+          created_at: transaction.created_at,
+          sqsp_id: transaction.sqsp_id,
+          product_descriptor: product?.descriptor || "Unknown",
+          catalog_product_type: catalogType,
+          product_type_override: mt.product_type_override,
+          product_type: isRefund ? "REFUND" : effectiveType,
+          display_status,
+        };
+      })
+      .filter((t): t is NonNullable<typeof t> => t !== null);
+
     const sortedTransactions = processedTransactions.sort((a, b) => {
       const aIsRefund =
-        (a.product_type as string) === "REFUND" ||
-        (a.refunded_amount ?? 0) > 0;
+        a.product_type === "REFUND" || (a.refunded_amount ?? 0) > 0;
       const bIsRefund =
-        (b.product_type as string) === "REFUND" ||
-        (b.refunded_amount ?? 0) > 0;
+        b.product_type === "REFUND" || (b.refunded_amount ?? 0) > 0;
 
       if (aIsRefund !== bIsRefund) {
         return aIsRefund ? -1 : 1;
@@ -280,95 +314,83 @@ const fetchMemberTransactions = async (memberId: number) => {
   }
 };
 
-
   const handleRecharacterize = async (
     transactionId: number,
-    newType: "MEMBERSHIP" | "FORUM" | "DONATION" | "REFUND"
+    lineItemIndex: number,
+    newType:
+      | "MEMBERSHIP"
+      | "FORUM"
+      | "DONATION"
+      | "REFUND"
+      | "UNKNOWN"
+      | "HIDDEN",
   ) => {
+    if (!selectedRow?.id) return;
+
+    const memberId = Number(selectedRow.id);
+    const li = Number(lineItemIndex ?? 0);
+
     try {
       const t = memberTransactions.find(
-        (t) => t.transaction_id === transactionId
+        (row) =>
+          row.transaction_id === transactionId &&
+          Number(row.line_item_index ?? 0) === li,
       );
-  
+
       if (!t) {
-        console.error("No transaction found for recharacterization");
+        alert(
+          "Could not find that transaction line. Close and reopen View transactions.",
+        );
         return;
       }
-  
-      const { sku, amount } = t;
-  
-      // 1. Update PRODUCT TYPE
-      const { error: productError } = await supabase
-        .from("products")
-        .update({
-          type: newType as any
-            | "MEMBERSHIP"
-            | "FORUM"
-            | "DONATION"
-            | "REFUND"
-            | "UNKNOWN"
-            | "HIDDEN",
-        })
-        .eq("sku", sku);
-  
-      if (productError) {
-        console.error("Failed to update product type", productError);
+
+      const { error: userErr } = await supabase.auth.getUser();
+      if (userErr) {
+        alert(
+          `Session could not be refreshed (${userErr.message}). Try signing out and back in.`,
+        );
         return;
       }
-  
-      if (newType === "REFUND") {
-        const { error: transError } = await supabase
-          .from("transactions")
-          .update({
-            refunded_amount: amount,      // full amount refunded
-            fulfillment_status: "CANCELED",   // valid enum value
-          })
-          .eq("id", transactionId);
-      
-        if (transError) {
-          console.error("Failed to update transaction refund fields", transError);
-          return;
-        }
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        alert("You must be signed in to recharacterize.");
+        return;
       }
-      
-  
-// 3. Update UI immediately
-setMemberTransactions(prev =>
-  prev.map(tr => {
-    if (tr.transaction_id !== transactionId) return tr;
 
-    // Copy the original fields
-    let updatedRefundedAmount = tr.refunded_amount;
-    let updatedFulfillmentStatus = tr.fulfillment_status;
-    let updatedDisplayStatus = tr.display_status;
+      const res = await fetch("/api/admin/recharacterize-member-transaction", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          memberId,
+          transactionId,
+          lineItemIndex: li,
+          newType,
+          lineAmount: t.amount,
+          catalogProductType: t.catalog_product_type,
+          sku: t.sku,
+        }),
+      });
 
-    // Case 1: REFUND (recharacterized as refund)
-    if (newType === "REFUND") {
-      updatedRefundedAmount = amount;         // Set refunded amount
-      updatedFulfillmentStatus = "CANCELED";  // Valid enum value
-      updatedDisplayStatus = "Fully Refunded";
-    } 
-    // Case 2: NOT refund → reset refund info
-    else {
-      updatedRefundedAmount = 0;              // Reset refunded amount
-      updatedFulfillmentStatus = "FULFILLED"; // Or the original status if you want
-      updatedDisplayStatus = "Completed";     // Reset display label
-    }
+      const json = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        alert(
+          json.error ??
+            `Save failed (${res.status}). Ensure SUPABASE_SERVICE_ROLE_KEY is set on the server for admin updates.`,
+        );
+        return;
+      }
 
-    return {
-      ...tr,
-      product_type: newType,
-      refunded_amount: updatedRefundedAmount,
-      fulfillment_status: updatedFulfillmentStatus,
-      display_status: updatedDisplayStatus,
-    };
-  })
-);
-
-      
-  
+      setMemberTransactions(await fetchMemberTransactions(memberId));
     } catch (err) {
       console.error("Unexpected error updating transaction type:", err);
+      alert(
+        err instanceof Error ? err.message : "Unexpected error while saving.",
+      );
     }
   };
   
@@ -379,7 +401,7 @@ setMemberTransactions(prev =>
       return;
     }
     
-    const transactions = await fetchMemberTransactions(selectedRow.id);
+    const transactions = await fetchMemberTransactions(Number(selectedRow.id));
     setMemberTransactions(transactions);
     setShowTransactions(true);
   };
@@ -413,7 +435,7 @@ setMemberTransactions(prev =>
         setPermissions(allPermissions);
         setTables(tablesArray);
 
-        if (tablesArray.length > 0 && !tablesArray.includes(selectedTable)) {
+        if (tablesArray.length > 0 && !tablesArray.includes(String(selectedTable))) {
           setSelectedTable(tablesArray[0] as TableName);
         }
       } catch (error) {
@@ -426,31 +448,137 @@ setMemberTransactions(prev =>
     setup().catch(console.error);
   }, []);
 
+  const enrichWithNames = async (
+    table: string,
+    data: Record<string, any>[],
+  ): Promise<Record<string, any>[]> => {
+    if (!data.length) return data;
+
+    const tableName = String(table);
+
+    if (
+      tableName === "committee_members" ||
+      tableName === "sdg_members" ||
+      tableName === "leadership"
+    ) {
+      const memberIds = [
+        ...new Set(data.map((r) => r.member_id).filter(Boolean)),
+      ];
+      const { data: members } = memberIds.length
+        ? await supabase
+            .from("members")
+            .select("id, first_name, last_name")
+            .in("id", memberIds)
+        : { data: [] };
+      const memberMap = new Map(
+        (members ?? []).map((m: any) => [
+          m.id,
+          `${m.first_name ?? ""} ${m.last_name ?? ""}`.trim(),
+        ]),
+      );
+
+      if (tableName === "committee_members") {
+        const committeeIds = [
+          ...new Set(data.map((r) => r.committee_id).filter(Boolean)),
+        ];
+        const { data: committees } = committeeIds.length
+          ? await supabase
+              .from("committees")
+              .select("id, committee_name")
+              .in("id", committeeIds)
+          : { data: [] };
+        const committeeMap = new Map(
+          (committees ?? []).map((c: any) => [c.id, c.committee_name ?? ""]),
+        );
+
+        return data.map((row) => ({
+          ...row,
+          member_name: memberMap.get(row.member_id) ?? "",
+          committee_name: committeeMap.get(row.committee_id) ?? "",
+        }));
+      }
+
+      if (tableName === "sdg_members") {
+        const sdgIds = [
+          ...new Set(data.map((r) => r.sdg_id).filter(Boolean)),
+        ];
+        const { data: sdgs } = sdgIds.length
+          ? await supabase.from("sdgs").select("id, sdg").in("id", sdgIds)
+          : { data: [] };
+        const sdgMap = new Map(
+          (sdgs ?? []).map((s: any) => [s.id, s.sdg ?? ""]),
+        );
+
+        return data.map((row) => ({
+          ...row,
+          member_name: memberMap.get(row.member_id) ?? "",
+          sdg_name: sdgMap.get(row.sdg_id) ?? "",
+        }));
+      }
+
+      if (tableName === "leadership") {
+        const posIds = [
+          ...new Set(
+            data.map((r) => r.leadership_position_id).filter(Boolean),
+          ),
+        ];
+        const { data: positions } = posIds.length
+          ? await supabase
+              .from("leadership_positions")
+              .select("id, leadership_position")
+              .in("id", posIds)
+          : { data: [] };
+        const posMap = new Map(
+          (positions ?? []).map((p: any) => [
+            p.id,
+            p.leadership_position ?? "",
+          ]),
+        );
+
+        return data.map((row) => ({
+          ...row,
+          member_name: memberMap.get(row.member_id) ?? "",
+          role_name: posMap.get(row.leadership_position_id) ?? "",
+        }));
+      }
+    }
+
+    return data;
+  };
+
   const fetchEntries = async () => {
     if (!selectedTable) return;
+    setIsFetchingEntries(true);
     try {
-      const { data, primaryKeys } =
-        await queryTableWithPrimaryKey(selectedTable);
+      const { data: rawData, primaryKeys } =
+        await queryTableWithPrimaryKey(selectedTable,
+          selectedTable === "audit_logs" ? { includeServiceLogs, limit: 1000 }: undefined,
+        );
+      const data = await enrichWithNames(String(selectedTable), rawData);
       setEntries(data);
-      setPrimaryKeys(primaryKeys ?? "");
+      
+      setPrimaryKeys(primaryKeys ?? []);
 
-      const keys = new Set(Object.keys(data[0]));
+      // Guard against empty data
+      const keys = data && data.length > 0 ? new Set(Object.keys(data[0])) : new Set<string>();
       const sortOptions = ["default"];
 
       for (const key of [
         "first_name",
         "last_name",
+        "member_name",
+        "committee_name",
+        "sdg_name",
+        "role_name",
         "sqsp_id",
         "descriptor",
         "sku",
         "date",
         "amount",
         "year",
-        "role_name",
         "table_name",
         "first_member_id",
         "member_id",
-        "committee_name",
         "id",
         "updated_at",
         "created_at",
@@ -462,14 +590,27 @@ setMemberTransactions(prev =>
 
       setSortOptions(sortOptions);
     } catch (error) {
-      console.error(`Failed to fetch data for table ${selectedTable}`, error);
+      console.error(
+        `Failed to fetch data for table ${String(selectedTable)}`,
+        error
+      );
       console.error("Error details:", JSON.stringify(error, null, 2));
+    } finally {
+      setIsFetchingEntries(false);
     }
   };
 
   useEffect(() => {
     fetchEntries();
-  }, [selectedTable]);
+  }, [selectedTable,includeServiceLogs]);
+
+  useEffect(() => {
+    if (!selectedRow || !entries.length || !primaryKeys.length) return;
+    const match = entries.find((row) =>
+      primaryKeys.every((pk) => row[pk] === selectedRow[pk]),
+    );
+    if (match) setSelectedRow(match);
+  }, [entries]);
 
   const hasPermission = (action: keyof Permission) => {
     if (!selectedTable) return false;
@@ -493,6 +634,15 @@ setMemberTransactions(prev =>
   const openEntryPanel = (mode: "add" | "edit") => {
     if (mode === "edit" && selectedRow === null) {
       alert("Select a row");
+      return;
+    }
+
+    if (mode === "add" && ASSIGN_TABLES.has(String(selectedTable))) {
+      if (!hasPermission("can_create")) {
+        alert("NO ADD PERMISSION");
+        return;
+      }
+      setIsAssignPanelOpen(true);
       return;
     }
 
@@ -529,8 +679,11 @@ setMemberTransactions(prev =>
               {memberTransactions.length === 0 ? (
                 <p className="text-gray-500">No transactions found.</p>
               ) : (
-                memberTransactions.map((transaction, index) => (
-                  <div key={index} className="border rounded-lg p-4">
+                memberTransactions.map((transaction) => (
+                  <div
+                    key={`${transaction.transaction_id}-${transaction.line_item_index}`}
+                    className="border rounded-lg p-4"
+                  >
                     <div className="grid grid-cols-2 gap-4">
                       <div>
                         <strong>Date:</strong> {isClient ? formatDate(transaction.date, true) : transaction.date}
@@ -539,11 +692,20 @@ setMemberTransactions(prev =>
                         <strong>Type:</strong> {transaction.product_type}
                         {
                         <select
-                          value={transaction.product_type}
+                          value={recharacterizeSelectValue(
+                            transaction.product_type,
+                          )}
                           onChange={(e) =>
                             handleRecharacterize(
                               transaction.transaction_id,
-                              e.target.value as "MEMBERSHIP" | "FORUM" | "DONATION" | "REFUND"
+                              transaction.line_item_index,
+                              e.target.value as
+                                | "MEMBERSHIP"
+                                | "FORUM"
+                                | "DONATION"
+                                | "REFUND"
+                                | "UNKNOWN"
+                                | "HIDDEN",
                             )
                           }
                           className="border rounded px-2 py-1 text-sm"
@@ -551,6 +713,8 @@ setMemberTransactions(prev =>
                           <option value="MEMBERSHIP">Membership</option>
                           <option value="FORUM">Forum</option>
                           <option value="DONATION">Donation</option>
+                          <option value="UNKNOWN">Unknown</option>
+                          <option value="HIDDEN">Hidden</option>
                           <option value="REFUND">Refund</option>
                         </select>
                         }
@@ -611,7 +775,7 @@ setMemberTransactions(prev =>
                   <div className="w-1/5">
                     <SelectDropdown
                       options={tables}
-                      selectedOption={selectedTable}
+                      selectedOption={String(selectedTable)}
                       setSelectedOption={(table) => {
                         setSelectedTable(table as TableName);
                       }}
@@ -661,14 +825,26 @@ setMemberTransactions(prev =>
                   </div> */}
                   <div className="flex items-center gap-4">
                     {selectedTable === "audit_logs" && (
-                      <label className="flex items-center gap-2 rounded-lg bg-white px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                      <label
+                        className={`flex items-center gap-2 rounded-lg bg-white px-3 py-2 text-sm text-gray-700 ${
+                          isFetchingEntries
+                            ? "cursor-wait opacity-80"
+                            : "hover:bg-gray-50"
+                        }`}
+                      >
                         <input
                           type="checkbox"
                           checked={includeServiceLogs}
+                          disabled={isFetchingEntries}
                           onChange={(e) => setIncludeServiceLogs(e.target.checked)}
                           className="h-4 w-4"
                         />
-                        Include cron/service logs
+                        <span>Include cron/service logs</span>
+                        {isFetchingEntries && (
+                          <span className="text-xs text-gray-500">
+                            Loading newest rows…
+                          </span>
+                        )}
                       </label>
                     )}
 
@@ -738,6 +914,21 @@ setMemberTransactions(prev =>
                   reloadData={fetchEntries}
                 />
               )}
+              {/* Assign Panel (committee_members, sdg_members, leadership) */}
+              {selectedTable &&
+                ASSIGN_TABLES.has(String(selectedTable)) && (
+                  <AssignPanel
+                    isOpen={isAssignPanelOpen}
+                    onClose={() => setIsAssignPanelOpen(false)}
+                    table={
+                      String(selectedTable) as
+                        | "committee_members"
+                        | "sdg_members"
+                        | "leadership"
+                    }
+                    reloadData={fetchEntries}
+                  />
+                )}
               {/* Delete Panel */}
               {selectedTable && (
                 <DeletePanel
