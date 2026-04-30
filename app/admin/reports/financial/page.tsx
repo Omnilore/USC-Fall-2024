@@ -11,7 +11,7 @@ import ExcelJS from "exceljs";
 import { saveAs } from "file-saver";
 import { effectiveMemberLineProductType } from "@/lib/utils";
 
-/** Mail-in report only has Membership / Forum / Donation rows (no "Other"). */
+/** Mail-in + summary buckets for MAIL lines (unknown catalog → Donation). */
 type MailInThree = "MEMBERSHIP" | "FORUM" | "DONATION";
 
 function resolveMailInBucket(line: {
@@ -32,8 +32,22 @@ function resolveMailInBucket(line: {
     return catalog;
   }
 
-  // No fourth "Other" row — rare UNKNOWN/HIDDEN without a main bucket
   return "DONATION";
+}
+
+function summaryBucketForNonMailLine(line: {
+  product_type_override: string | null;
+  products: { type: string } | null;
+}): "MEMBERSHIP" | "FORUM" | "DONATION" | null {
+  const eff = effectiveMemberLineProductType(
+    line.products?.type,
+    line.product_type_override,
+  );
+  const u = eff.toUpperCase();
+  if (u === "MEMBERSHIP" || u === "FORUM" || u === "DONATION") {
+    return u;
+  }
+  return null;
 }
 
 const TreasurerReqs = () => {
@@ -81,8 +95,13 @@ const TreasurerReqs = () => {
   const [stripePayouts, setStripePayouts] = useState<
     Record<string, SupabasePayout>
   >({});
-  /** Keys: `${"MEMBERSHIP"|"FORUM"|"DONATION"}-${year}-${month}` → line amount sum */
+  /** Keys: `${"MEMBERSHIP"|"FORUM"|"DONATION"}-${year}-${month}` → MAIL line sum */
   const [mailInData, setMailInData] = useState<Record<string, number>>({});
+  /** Donation-bucket mail-in only (for Donation card subtitle; includes unclassified → Donation). */
+  const [mailInDonationSummary, setMailInDonationSummary] = useState<{
+    total: number;
+    count: number;
+  }>({ total: 0, count: 0 });
   const [fetchPayoutsErr, setFetchPayoutsErr] = useState<string | null>(null);
   const [availableYears, setAvailableYears] = useState<string[]>([]);
 
@@ -828,56 +847,73 @@ const TreasurerReqs = () => {
     setGrossData(grossResults);
     setFeeData(feeResults);
 
+    // Top summary cards: one pass over all platforms so MAIL lines are not double-counted
+    // (RPC gross/fee may already overlap mail-in amounts depending on DB functions).
     const summary = {
       membership: { total: 0, count: 0 },
       forum: { total: 0, count: 0 },
       donation: { total: 0, count: 0 },
     };
+    const txnIdsByBucket: Record<MailInThree, Set<number>> = {
+      MEMBERSHIP: new Set(),
+      FORUM: new Set(),
+      DONATION: new Set(),
+    };
 
-    for (const category of categories) {
-      let categoryTotal = 0;
-      for (const { year, month } of range) {
-        const upperCaseCategory = category.toUpperCase();
-        const key = `${upperCaseCategory}-${year}-${month}`;
-        const gross = grossResults[key] ?? 0;
-        const fee = feeResults[key] ?? 0;
-        categoryTotal += gross - fee;
-      }
-
-      const categoryKey = category.toLowerCase() as 'membership' | 'forum' | 'donation';
-      summary[categoryKey].total = categoryTotal;
-
-      const { data: countData, error: countError } = await supabase
-        .from("transactions")
-        .select(
-          "id, members_to_transactions!inner(sku, product_type_override, products!inner(type))",
+    const { data: summaryTransactions, error: summaryTxError } = await supabase
+      .from("transactions")
+      .select(
+        `
+        id,
+        date,
+        payment_platform,
+        members_to_transactions (
+          amount,
+          product_type_override,
+          products ( type )
         )
-        .gte("date", fromDateValue)
-        .lte("date", toDateValue);
+      `,
+      )
+      .gte("date", fromDateValue)
+      .lte("date", toDateValue);
 
-      if (!countError && countData) {
-        const want = category.toUpperCase() as
-          | "MEMBERSHIP"
-          | "FORUM"
-          | "DONATION";
-        const matching = countData.filter((t) => {
-          const lines = t.members_to_transactions as
-            | {
-                sku: string;
-                product_type_override: string | null;
-                products: { type: string };
-              }[]
-            | null;
-          return (lines ?? []).some((line) => {
-            const eff = effectiveMemberLineProductType(
-              line.products?.type,
-              line.product_type_override,
-            );
-            return eff === want;
-          });
-        });
-        summary[categoryKey].count = new Set(matching.map((t) => t.id)).size;
+    if (!summaryTxError && summaryTransactions) {
+      for (const t of summaryTransactions) {
+        const d = new Date(t.date as string);
+        const y = d.getUTCFullYear();
+        const mo = d.getUTCMonth() + 1;
+        if (!range.some((r) => r.year === y && r.month === mo)) continue;
+
+        const lines = t.members_to_transactions as
+          | {
+              amount: number;
+              product_type_override: string | null;
+              products: { type: string } | null;
+            }[]
+          | null;
+
+        const platform = t.payment_platform ?? "";
+
+        for (const line of lines ?? []) {
+          const bucket =
+            platform === "MAIL"
+              ? resolveMailInBucket(line)
+              : summaryBucketForNonMailLine(line);
+          if (bucket === null) continue;
+
+          const amt = Number(line.amount);
+          const sk = bucket.toLowerCase() as
+            | "membership"
+            | "forum"
+            | "donation";
+          summary[sk].total += amt;
+          txnIdsByBucket[bucket].add(Number(t.id));
+        }
       }
+
+      summary.membership.count = txnIdsByBucket.MEMBERSHIP.size;
+      summary.forum.count = txnIdsByBucket.FORUM.size;
+      summary.donation.count = txnIdsByBucket.DONATION.size;
     }
 
     setCategorySummary(summary);
@@ -964,7 +1000,11 @@ const TreasurerReqs = () => {
     if (mailTxError) {
       console.error("Mail-in financial summary:", mailTxError.message);
       setMailInData({});
+      setMailInDonationSummary({ total: 0, count: 0 });
     } else {
+      let mailInDonationTotal = 0;
+      const mailInDonationTxnIds = new Set<number>();
+
       for (const t of mailTransactions ?? []) {
         const d = new Date(t.date as string);
         const year = d.getUTCFullYear();
@@ -980,13 +1020,25 @@ const TreasurerReqs = () => {
             }[]
           | null;
 
+        let thisTxnHasDonationLine = false;
         for (const line of lines ?? []) {
           const bucket = resolveMailInBucket(line);
           const key = `${bucket}-${year}-${month}`;
           mail_in[key] = (mail_in[key] ?? 0) + Number(line.amount);
+          if (bucket === "DONATION") {
+            mailInDonationTotal += Number(line.amount);
+            thisTxnHasDonationLine = true;
+          }
+        }
+        if (thisTxnHasDonationLine) {
+          mailInDonationTxnIds.add(Number(t.id));
         }
       }
       setMailInData(mail_in);
+      setMailInDonationSummary({
+        total: mailInDonationTotal,
+        count: mailInDonationTxnIds.size,
+      });
     }
   };
 
@@ -1293,7 +1345,14 @@ const TreasurerReqs = () => {
                         {format(categorySummary.donation.total)}
                       </p>
                       <p className="text-xs text-black">
-                        {categorySummary.donation.count} transactions
+                        {categorySummary.donation.count} transactions (all
+                        sources)
+                      </p>
+                      <p className="mt-1 text-xs text-purple-900/90">
+                        Mail-in donation:{" "}
+                        {format(mailInDonationSummary.total)} ·{" "}
+                        {mailInDonationSummary.count} mail-in transaction
+                        {mailInDonationSummary.count === 1 ? "" : "s"}
                       </p>
                     </div>
                   </div>
