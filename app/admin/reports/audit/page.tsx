@@ -108,7 +108,14 @@ export default function AuditReportPage() {
           .select("*")
           .order("recorded_at", { ascending: false })
           .limit(DEFAULT_LIMIT);
-
+        if(hideCron){
+          query = supabase
+          .from("audit_logs" as any)
+          .select("*")
+          .neq("source", "service")
+          .order("recorded_at", { ascending: false })
+          .limit(DEFAULT_LIMIT);
+        }
         const startInstant = pacificStartInstant(startDate);
         const endInstant = pacificEndInstant(endDate);
 
@@ -148,7 +155,7 @@ export default function AuditReportPage() {
     };
 
     fetchLogs().catch(console.error);
-  }, [startDate, endDate, tableFilter, operationFilter, sourceFilter, actorFilter]);
+  }, [startDate, endDate, tableFilter, operationFilter, sourceFilter, actorFilter, hideCron]);
 
   const tableOptions = useMemo(() => {
     const tables = new Set<string>();
